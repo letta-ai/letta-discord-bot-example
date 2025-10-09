@@ -87,7 +87,13 @@ async function triggerLetta(
   task: Task, 
   client?: Client
 ): Promise<boolean> {
+  const taskName = String(task.task_name || 'Unnamed');
+  const taskMsgId = task.message_id || 'no-id';
+  const timestamp = new Date().toISOString();
+  
   try {
+    console.log(`🗓️  🚀 [${timestamp}] Triggering Letta for task: "${taskName}" (msg_id=${taskMsgId})`);
+    
     // Try to get a target channel for Letta's response
     let targetChannel: TextChannel | undefined;
     
@@ -111,28 +117,41 @@ async function triggerLetta(
 
     // Send task to Letta via messages.ts infrastructure (streaming, chunking, error handling)
     await sendTaskMessage(task, targetChannel);
-    console.log(`🗓️  ✅ Triggered Letta for task: ${task.task_name}`);
+    console.log(`🗓️  ✅ [${new Date().toISOString()}] Triggered Letta successfully: "${taskName}" (msg_id=${taskMsgId})`);
     return true;
   } catch (e: any) {
-    console.error(`🗓️  ❌ Failed to trigger Letta: ${e?.message || e}`);
+    console.error(`🗓️  ❌ [${new Date().toISOString()}] Failed to trigger Letta for "${taskName}" (msg_id=${taskMsgId}):`, e?.message || e);
     return false;
   }
 }
 
 async function deleteTaskMessage(messageId?: string): Promise<boolean> {
   try {
-    if (!messageId || !DISCORD_TOKEN || !TASKS_CHANNEL_ID) return false;
+    if (!messageId || !DISCORD_TOKEN || !TASKS_CHANNEL_ID) {
+      console.log(`🗓️  ⏭️  Skipping delete (missing params): msg_id=${messageId || 'none'}`);
+      return false;
+    }
+    
+    const timestamp = new Date().toISOString();
+    console.log(`🗓️  🗑️  [${timestamp}] Attempting to delete task message: ${messageId}`);
+    
     const url = `https://discord.com/api/v10/channels/${TASKS_CHANNEL_ID}/messages/${messageId}`;
     const headers = { Authorization: `Bot ${DISCORD_TOKEN}` };
     const resp = await axios.delete(url, { headers, timeout: 10_000 });
+    
     if (resp.status === 204) {
-      console.log(`🗓️  ✅ Deleted task message: ${messageId}`);
+      console.log(`🗓️  ✅ [${new Date().toISOString()}] Successfully deleted task message: ${messageId}`);
       return true;
     }
-    console.warn(`🗓️  ⚠️  Failed to delete: ${resp.status}`);
+    console.warn(`🗓️  ⚠️  [${new Date().toISOString()}] Failed to delete msg ${messageId}: HTTP ${resp.status}`);
     return false;
-  } catch (e) {
-    console.error('🗓️  ❌ Error deleting message:', e);
+  } catch (e: any) {
+    // Check if it's a 404 (already deleted) - this is actually OK in our dedup scenario
+    if (e?.response?.status === 404) {
+      console.log(`🗓️  ℹ️  [${new Date().toISOString()}] Task message ${messageId} already deleted (404) - this is OK`);
+      return false; // Don't retry recurring update if message doesn't exist
+    }
+    console.error(`🗓️  ❌ [${new Date().toISOString()}] Error deleting message ${messageId}:`, e?.message || e);
     return false;
   }
 }
@@ -219,8 +238,20 @@ async function updateRecurringTask(task: Task): Promise<boolean> {
   }
 }
 
+// Singleton guard to prevent multiple loops
+let isTaskCheckerRunning = false;
+const processingTasks = new Set<string>(); // Track tasks being processed
+
 export function startTaskCheckerLoop(client?: Client): void {
-  console.log('🗓️  Task Scheduler started');
+  // SECURITY: Prevent multiple task checker loops from running in parallel
+  if (isTaskCheckerRunning) {
+    console.warn('⚠️  🗓️  Task Scheduler already running! Ignoring duplicate start call.');
+    return;
+  }
+  
+  isTaskCheckerRunning = true;
+  console.log('🗓️  Task Scheduler started (singleton mode)');
+  
   const LOOP_MS = 60_000;
   async function tick() {
     try {
@@ -232,18 +263,36 @@ export function startTaskCheckerLoop(client?: Client): void {
           console.log(`🗓️  ${due.length} task(s) due for execution`);
           for (const t of due) {
             const name = String(t.task_name || '');
-            const messageId = t.message_id;
+            const messageId = t.message_id || '';
             const oneTime = !!t.one_time;
-            const ok = await triggerLetta(t, client);
-            if (ok) {
-              const deleted = await deleteTaskMessage(messageId);
-              if (deleted) {
-                if (!oneTime) {
-                  await updateRecurringTask(t);
-                } else {
-                  console.log(`🗓️  🗑️  One-time task completed and deleted: ${name}`);
+            
+            // SECURITY: Deduplication - prevent processing the same task twice
+            const taskKey = messageId || `${name}_${t.next_run}`;
+            if (processingTasks.has(taskKey)) {
+              console.log(`🗓️  ⏭️  Skipping task already being processed: ${name} (key=${taskKey})`);
+              continue;
+            }
+            
+            // Mark task as being processed
+            processingTasks.add(taskKey);
+            console.log(`🗓️  🔒 Processing task: ${name} (key=${taskKey})`);
+            
+            try {
+              const ok = await triggerLetta(t, client);
+              if (ok) {
+                const deleted = await deleteTaskMessage(messageId);
+                if (deleted) {
+                  if (!oneTime) {
+                    await updateRecurringTask(t);
+                  } else {
+                    console.log(`🗓️  🗑️  One-time task completed and deleted: ${name}`);
+                  }
                 }
               }
+            } finally {
+              // Always remove from processing set when done
+              processingTasks.delete(taskKey);
+              console.log(`🗓️  🔓 Released task: ${name} (key=${taskKey})`);
             }
           }
         }
