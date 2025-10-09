@@ -1,204 +1,263 @@
-<a href="https://docs.letta.com/">
-  <img alt="Stateful AI agent Discord chatbot template built with Letta" src="/assets/discord_chatbot_header_2x.png">
-  <h1 align="center">Letta Discord Bot Example</h1>
-</a>
+# 🤖 Discord Bot with Letta AI
 
-<p align="center">
-  Deploy your own AI chatbot using <a href="https://docs.letta.com/">Letta</a> to create agents that can learn over time.
-</p>
-
-<div align="center">
-|
-  <a href="#-features">Features</a> · 
-  <a href="#-whats-included">What's included</a> · 
-  <a href="#%EF%B8%8F-quickstart">Quickstart</a> · 
-  <a href="#-running-the-app-locally">Running the app locally</a>
-|
-</div>
-
-<div align="center">
-<h3>One-click deploy with Railway</h3>
-<a href="https://railway.com/template/C__ceE?referralCode=kdR8zc"><img src="https://railway.com/button.svg" alt="Deploy on Railway"/></a></div>
-</div>
-
-### 
-
-> [!NOTE]
-> You must also have a Discord app to use this app. Follow these [instructions](#-create-your-discord-app-and-set-your-variables) to create your Discord app.
-
-## 📺 Video overview (watch on YouTube)
-
-[![AI agents + Discord! Make a Discord chatbot with long-term memory using Letta](https://img.youtube.com/vi/HDyCAV-xuMw/0.jpg)](https://www.youtube.com/watch?v=HDyCAV-xuMw)
+A powerful, production-ready Discord bot integrated with [Letta AI](https://www.letta.com/) for intelligent conversations with long-term memory, task scheduling, and image processing capabilities.
 
 ## ✨ Features
 
-- 🧠 [Letta](https://github.com/letta-ai/letta)
+### 🧠 **Letta AI Integration**
+- Intelligent conversations with persistent memory
+- Context-aware responses across sessions
+- Customizable agent personalities
+- Streaming responses for real-time interaction
+- Automatic message chunking for long responses (Discord 2000 char limit)
 
-  - Formerly known as **MemGPT**, Letta is an open-source framework designed for building **stateful LLM applications**. Our Discord bot example showcases powerful core features of Letta.
+### 📸 **Image Processing**
+- Multi-image support (up to 10 images per message)
+- Automatic compression for large files (4MB+ → optimized)
+- Security: SSRF protection (Discord CDN only)
+- Rate limiting: 1 request per 3 seconds per user
+- Supports JPEG, PNG, WebP formats
 
-- Discord Bot
+### ⏰ **Task Scheduler**
+- Schedule notifications and reminders
+- Recurring tasks (daily, hourly, custom intervals)
+- One-time or repeating tasks
+- User mentions and channel posts
+- JSON-based task configuration
 
-  - Interacts with your Discord server to send and receive messages.
-    
-    <img width="400" alt="image" src="https://github.com/user-attachments/assets/a09ce294-6cec-477f-ac60-f4b52493af67" />
-  - Interacts with you through Direct Messages (DMs) and send and receive messages.
-    
-    <img width="400" alt="image" src="https://github.com/user-attachments/assets/0eabe8fa-556b-436f-9fbc-496f198ef482" />
+### 🔔 **Heartbeat System** (Optional)
+- Autonomous agent activity
+- Configurable intervals and probability
+- Allows agent to reflect and self-organize
 
+### 🔒 **Security & Performance**
+- Input validation on all URLs
+- Memory leak prevention
+- Proper error handling with user-friendly messages
+- PM2 support for 24/7 operation
+- Rate limiting per user
 
+## 🚀 Quick Start
 
+### Prerequisites
 
-## 📦 What's included
+- **Node.js** >= 18.0.0
+- **Discord Bot** - [Create one here](https://discord.com/developers/applications)
+- **Letta API Account** - [Sign up at letta.com](https://www.letta.com/)
 
-- [Letta TypeScript SDK](https://github.com/letta-ai/letta-node)
+### Installation
 
-  - The Letta TypeScript library provides convenient access to the Letta API.
-
-- [Discord.js](https://discord.js.org/)
-
-  - Discord.js is a Node.js library that allows you to interact with the [Discord API](https://discord.com/developers/docs/intro), making it easy to build bot applications.
-
-- [Express JS](https://expressjs.com)
-
-  - Express JS is a minimal and flexible web framework for Node.js. We use Express to create a web server that accepts HTTP requests and interacts with the **Letta server** to generate responses. Express is also used to interact with the **Discord API**.
-
-- [TypeScript](https://www.typescriptlang.org)
-
-  - TypeScript enhances our codebase with **static typing, improved maintainability, and better developer tooling**, reducing potential runtime errors.
-
-
----
-
-# ⚡️ Quickstart
-
-### 📋 What you need before starting
-
-- [Node.js](https://nodejs.org/en/download/)
-- [npm](https://www.npmjs.com/get-npm)
-- [Docker](https://docs.docker.com/get-docker/)
-- [Discord App](https://discord.com/developers/applications)
-- [LocalTunnel](https://github.com/localtunnel/localtunnel)
-
-# 🚀 Running the app locally
-
-> [!NOTE]
-> These are instructions for running the *Discord bot server* locally, which connects a Letta server to Discord.
-> If you're using Letta Cloud, all you'll need is your Letta Cloud API key + the Discord bot server, but if you're self-hosting, you'll also need to set up a Letta server.
-
-## 💻 Grab a Letta API key
-
-Follow the [quickstart guide](https://docs.letta.com/quickstart) to get your own Letta Cloud API key.
-
-You can run your own Letta server using [Letta Desktop](https://docs.letta.com/quickstart/desktop) or [Docker](https://docs.letta.com/quickstart/docker).
-If you're self-hosting a server, the Letta server will run on `http://localhost:8283` by default (that will be your `LETTA_BASE_URL`).
-
-## 👉 Set up app
-
-1️⃣ Clone the repository and install dependencies:
-
+1. **Clone the repository**
 ```bash
-# Clone the repository
-git clone https://github.com/letta-ai/letta-discord-bot-example.git
+git clone https://github.com/Duzafizzl/Letta-Discord-advanced.git
+cd Letta-Discord-advanced
+```
 
-# Navigate to the project directory
-cd letta-discord-bot-example
-
-# Install dependencies
+2. **Install dependencies**
+```bash
 npm install
-
-# Set environment variables
-cp .env.template .env
 ```
 
-2️⃣ Update the `.env` file with your Letta variables
+3. **Configure environment**
+```bash
+# Copy the example env file
+cp .env.example .env
 
-
-## 👾 Create your Discord app and set your variables
-
-1️⃣ Create a new Discord application [here](https://discord.com/developers/applications).
-
-<img width="475" alt="image" src="https://github.com/user-attachments/assets/b57ec05b-5381-43f4-afc4-824a84abdd55" />
-
-
-2️⃣ Under `Settings` -> `General Information` of your Discord app, copy your Discord application's `Application ID` and `Public Key`, and paste them in your `.env` file.
-
-<img width="1302" alt="image" src="https://github.com/user-attachments/assets/56e55a8e-6322-48a7-9b36-afbf538db359" />
-
-
-3️⃣ Under `Settings` -> `Bot` of your Discord app, copy your Discord bot's `Token`, and paste it in your `.env` file.
-
-<img width="1426" alt="image" src="https://github.com/user-attachments/assets/f3ba4098-c976-427c-8b3d-1811d93d2b71" />
-
-4️⃣ Enable the Privileged Gateway Intents
-
-<img width="1667" alt="image" src="https://github.com/user-attachments/assets/68978702-42d0-4630-9b83-56e3a7ce6e14" />
-
-5️⃣ Under `Settings` -> `Installation`, under `Guild Install` set up `scopes` and `permissions`
-
-<img width="1057" alt="image" src="https://github.com/user-attachments/assets/73921af7-7478-4b51-b388-ff30b9844d2f" />
-
-
-6️⃣ Install Discord Bot on your server; copy and paste `Link` on your browser.
-
-<img width="2130" alt="image" src="https://github.com/user-attachments/assets/c6e22db7-7bde-4d34-ab67-074ee5c048b0" />
-
-### ⚙️ Environment variables
-
-Environment variables can be controlled by setting them in your `.env` file or by setting them in your deployment environment.
-
-The following environment variables can be set in the `.env` file:
-
-* `LETTA_API_KEY`: The password of your Letta server (if you self-deployed a server). Not applicable if you are not using a password (see [docs](https://docs.letta.com/guides/server/docker#password-protection-advanced)).
-* `LETTA_BASE_URL`: The base URL of your Letta server. Defaults to `https://api.letta.com` (Letta Cloud). If you're using a self-hosted Letta server, this is usually `http://localhost:8283`.
-* `LETTA_AGENT_ID`: The ID of the Letta agent to use for the bot.
-
-* `APP_ID`: The ID of your Discord application.
-* `DISCORD_TOKEN`: The bot token for your Discord bot.
-* `PUBLIC_KEY`: The public key for your Discord bot.
-* `DISCORD_CHANNEL_ID`: Set this if you want the bot to only respond to messages (listen) in a specific channel.
-
-* `PORT`: The port to run the app on. Default is `3001`.
-
-* `ENABLE_TIMER`: Enable or disable the timer feature (will randomly trigger an agent input/event at a certain interval, defaults to true). Note that the timer feature requires `DISCORD_CHANNEL_ID` to be set (so that the agent knows where to send a message to if the timer is fired).
-* `TIMER_INTERVAL_MINUTES`: Maximum interval range in minutes for the random timer (defaults to every 15 minutes).
-* `FIRING_PROBABILITY`: Probability of the timer firing (0.0 to 1.0), defaults to 0.1 (10%).
-
-For more settings (including options to enable/disable DM interactions, reply to non-directed messages, etc.), view the [`.env.template`](/.env.template) file provided.
-
-### 👾 Create your Letta agent
-
-You can connect an existing agent to Discord (by using its `LETTA_AGENT_ID`), or you can create a brand new agent specifically to use as a Discord bot.
-
-If you create a new agent, we'd recommend adding some information (e.g. inside of the `human` or `persona` memory block) that explains how to interact with Discord. For example, placing the following text in `human`:
-```
-I can use this space in my core memory to take notes on the users that I am interacting with.
-So far, all I know that is that I am connected to a Discord server.
-I can see messages that other users send on this server, as long as they are directed at me (with a mention or a reply).
-I should also remember that if I want to "at" a user, I need to use the <@discord-id> format in my message response.
-This will render the user tag in a dynamic way on Discord, vs any other reference to a user (eg their username) will just result in plaintext.
+# Edit .env with your values
+nano .env  # or use your preferred editor
 ```
 
-Additionally, if you would like to give your chatbot/agent the ability to "ignore" (not reply) to certain messages, you can add a custom tool like this to your agent (for information on how to add a custom tool, see [our docs](https://docs.letta.com/guides/agents/tools#custom-tools)):
-```python
-def ignore():
-    """
-    Not every message warrants a reply (especially if the message isn't directed at you). Call this tool to ignore the message.
-    """
-    return
+4. **Build TypeScript**
+```bash
+npm run build
 ```
 
-The ability for an agent to "ignore" messages can be crucial if you connect your agent to an active Discord channel with many participants, especially if you set `RESPOND_TO_GENERIC` to `true` (in which case the agent will "see" every single message in a channel, even messages not directed at the agent itself).
-
-## 🚀 Run app
-
-To run the app locally, simply do:
+5. **Start the bot**
 ```bash
 npm start
 ```
 
-This will spin up the Discord bot service, which will listen for events on Discord, and when an event happens (e.g. a message is sent in a channel), it will send an appropriate message to the Letta server, check for a response from the Letta server, and potentially send back a reply message on Discord.
+## ⚙️ Configuration
 
-We have also prepared a one-click deploy option to easily deploy this repo on Railway.
-Simply click the deploy link, enter your environment variables (including your Letta server address and Letta agent ID), and your Discord bot will be ready to go (and live 24/7):
+### Required Environment Variables
 
-<a href="https://railway.com/template/C__ceE?referralCode=kdR8zc"><img src="https://railway.com/button.svg" alt="Deploy on Railway"/></a>
+```env
+# Discord
+DISCORD_TOKEN=your_discord_bot_token
+
+# Letta AI
+LETTA_API_KEY=your_letta_api_key
+LETTA_AGENT_ID=your_agent_id
+```
+
+### Optional Configuration
+
+See `.env.example` for all available options including:
+- Response modes (mentions, DMs, channels)
+- Task scheduler settings
+- Heartbeat/timer configuration
+- Logging preferences
+
+## 📦 Deployment
+
+### Local Development
+
+```bash
+npm run dev
+```
+
+### Production with PM2 (24/7)
+
+```bash
+# Install PM2 globally
+npm install -g pm2
+
+# Start bot
+npm run pm2:start
+
+# View logs
+npm run pm2:logs
+
+# Restart bot
+npm run pm2:restart
+
+# Auto-start on system boot
+pm2 startup
+pm2 save
+```
+
+### Cloud Deployment
+
+You can deploy to various cloud platforms:
+- **Railway** - One-click deploy
+- **Heroku** - Free tier available
+- **DigitalOcean** - Droplets starting at $5/month
+- **AWS/GCP/Azure** - Enterprise options
+- **Any VPS** - Self-hosted with PM2
+
+## 🗓️ Task Scheduler
+
+Create scheduled tasks in your designated tasks channel:
+
+```json
+{
+  "task_name": "morning_reminder",
+  "description": "Daily good morning message",
+  "schedule": "daily",
+  "next_run": "2025-10-10T09:00:00",
+  "action_type": "user_reminder",
+  "action_target": "USER_ID_HERE",
+  "action_template": "Good morning! Have a great day! ☀️",
+  "one_time": false,
+  "active": true
+}
+```
+
+### Schedule Formats
+
+- `daily` - Every day at the specified time
+- `hourly` - Every hour
+- `minutely` - Every minute (for testing)
+- `every_X_minutes` - Custom minute interval
+- `every_X_hours` - Custom hour interval
+- `every_X_days` - Custom day interval
+- `weekly` - Every 7 days
+- `monthly` - Every month
+
+The bot checks for due tasks every 60 seconds.
+
+## 📸 Image Processing
+
+Send images to the bot and it will analyze them using Letta AI's vision capabilities.
+
+### Features:
+- ✅ Up to 10 images per message
+- ✅ Automatic compression for large files
+- ✅ Security validation (Discord CDN only)
+- ✅ Detailed error messages
+- ✅ Rate limiting to prevent spam
+
+### Example:
+
+Simply upload an image and add text:
+```
+@BotName What's in this image?
+```
+
+The bot will:
+1. Download the image(s)
+2. Compress if needed (>4MB → WebP/JPEG optimized)
+3. Send to Letta AI for analysis
+4. Reply with the AI's description
+
+## 🛠️ Letta Tools
+
+This bot comes with pre-configured Letta tools for Discord interaction. You need to set these up in your Letta agent:
+
+### Required Tools:
+
+1. **send_discord_dm** - Send direct messages to users
+2. **send_discord_message** - Post in Discord channels
+3. **create_scheduled_task** - Create new scheduled tasks
+4. **delete_scheduled_task** - Remove scheduled tasks
+
+See [docs/LETTA_TOOLS.md](docs/LETTA_TOOLS.md) for detailed tool schemas and setup instructions.
+
+## 📚 Documentation
+
+- [Letta Tools Setup](docs/LETTA_TOOLS.md) - Discord tool configurations
+- [Image Processing](docs/ATTACHMENT_FORWARDER_TESTS.md) - Image handling details
+- [Contributing](CONTRIBUTING.md) - How to contribute
+
+## 🐛 Troubleshooting
+
+### Bot won't start
+
+```bash
+# Check logs
+npm run pm2:logs
+
+# Common issues:
+# - Missing .env file → cp .env.example .env
+# - Invalid Discord token → check Discord Developer Portal
+# - Missing dependencies → npm install
+```
+
+### Task scheduler not working
+
+- Ensure `TASKS_CHANNEL_ID` is set in `.env`
+- Check channel permissions (bot needs read access)
+- View logs: `npm run pm2:logs`
+
+### Images not processing
+
+- Check if `sharp` is installed: `npm list sharp`
+- Install system dependencies (Debian/Ubuntu): `sudo apt install libvips-dev`
+- Rebuild Sharp: `npm install sharp --build-from-source`
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [Letta AI](https://www.letta.com/) - For the amazing AI platform
+- [Discord.js](https://discord.js.org/) - For the Discord API wrapper
+- [Sharp](https://sharp.pixelplumbing.com/) - For image processing
+
+## 🔗 Links
+
+- [Letta Documentation](https://docs.letta.com/)
+- [Discord.js Guide](https://discordjs.guide/)
+- [PM2 Documentation](https://pm2.keymetrics.io/docs/)
+
+---
+
+**Made with ❤️ for the community**
+
+*If you find this project helpful, consider giving it a ⭐ on GitHub!*
+
