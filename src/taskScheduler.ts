@@ -12,11 +12,17 @@ type Task = {
   next_run?: string;
   active?: boolean;
   one_time?: boolean;
-  schedule?: string; // e.g. "daily", "hourly", "every_3_hours"
+  schedule?: string; // e.g. "daily", "hourly", "every_3_hours", "weekly", "monthly", "yearly", "on_date"
+  time?: string; // HH:MM format
+  specific_date?: string; // For "on_date": YYYY-MM-DD or DD.MM.YYYY
+  day_of_week?: string; // For "weekly": "monday", "tuesday", etc.
+  day_of_month?: number; // For "monthly" or "yearly": 1-31
+  month?: number; // For "yearly": 1-12
   message_id?: string;
   description?: string;
   action_type?: string; // e.g. "user_reminder" | "channel_post"
   action_target?: string; // e.g. user id or channel id/name
+  action_template?: string; // Message template
   [key: string]: unknown;
 };
 

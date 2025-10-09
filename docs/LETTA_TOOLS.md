@@ -284,11 +284,27 @@ Create a scheduled task with flexible timing (one-time or recurring).
       },
       "schedule": {
         "type": "string",
-        "description": "Timing for execution. Supported: 'in_X_minutes', 'in_X_hours', 'in_X_seconds', 'tomorrow_at_HH:MM', 'daily', 'hourly', 'weekly', 'monthly', 'yearly', 'minutely', 'every_X_minutes', 'every_X_hours', 'every_X_days', 'every_X_weeks'."
+        "description": "Timing for execution. Supported: 'on_date' (specific date), 'in_X_minutes', 'in_X_hours', 'tomorrow_at_HH:MM', 'daily', 'weekly', 'monthly', 'yearly', 'hourly', 'minutely', 'every_X_minutes', 'every_X_hours', 'every_X_days', 'every_X_weeks'."
       },
       "time": {
         "type": "string",
-        "description": "Time in HH:MM format for daily schedules (optional)."
+        "description": "Time in HH:MM format (24-hour). Works with all schedule types."
+      },
+      "specific_date": {
+        "type": "string",
+        "description": "For 'on_date' schedule: Specific date in YYYY-MM-DD or DD.MM.YYYY format (e.g., '2025-12-25' or '25.12.2025')."
+      },
+      "day_of_week": {
+        "type": "string",
+        "description": "For 'weekly' schedule: Day name - 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'."
+      },
+      "day_of_month": {
+        "type": "integer",
+        "description": "For 'monthly' or 'yearly' schedule: Day of month (1-31)."
+      },
+      "month": {
+        "type": "integer",
+        "description": "For 'yearly' schedule: Month number (1-12, where 1=January, 12=December)."
       },
       "action_type": {
         "type": "string",
@@ -327,7 +343,11 @@ def create_scheduled_task(
     action_type: str,
     action_template: str,
     time: str = None,
-    action_target: str = None
+    action_target: str = None,
+    specific_date: str = None,  # NEW: "YYYY-MM-DD" or "DD.MM.YYYY"
+    day_of_week: str = None,    # NEW: "monday", "tuesday", etc.
+    day_of_month: int = None,   # NEW: 1-31 for monthly/yearly
+    month: int = None           # NEW: 1-12 for yearly
 ):
     # ⚠️ REPLACE THESE with your configuration
     DISCORD_BOT_TOKEN = "YOUR_DISCORD_BOT_TOKEN_HERE"
@@ -335,11 +355,44 @@ def create_scheduled_task(
     DEFAULT_USER_ID = "YOUR_DISCORD_USER_ID_HERE"
     
     """
-    Creates a scheduled or one-time task with flexible rhythm
+    Creates a scheduled or one-time task with flexible rhythm and SPECIFIC DATES!
+    
+    New capabilities:
+    - Specific date: schedule="on_date", specific_date="2025-12-25", time="10:00"
+    - Weekly on day: schedule="weekly", day_of_week="monday", time="09:00"
+    - Monthly on day: schedule="monthly", day_of_month=15, time="10:00"
+    - Yearly on date: schedule="yearly", month=12, day_of_month=25, time="09:00"
     """
     try:
         now = datetime.now()
-        one_time = schedule.startswith("in_") or schedule.startswith("tomorrow_")
+        one_time = schedule.startswith("in_") or schedule.startswith("tomorrow_") or schedule == "on_date"
+        
+        # --- Calculate next run time ---
+        
+        # SPECIFIC DATE (one-time)
+        if schedule == "on_date" and specific_date:
+            # Parse date (support both formats)
+            if "." in specific_date:
+                # European format: DD.MM.YYYY
+                day, month_num, year = map(int, specific_date.split("."))
+                next_run = datetime(year, month_num, day, 0, 0, 0)
+            elif "-" in specific_date:
+                # ISO format: YYYY-MM-DD
+                year, month_num, day = map(int, specific_date.split("-"))
+                next_run = datetime(year, month_num, day, 0, 0, 0)
+            else:
+                return {"status": "error", "message": "specific_date must be in format YYYY-MM-DD or DD.MM.YYYY"}
+            
+            # Set time if provided
+            if time:
+                hour, minute = map(int, time.split(":"))
+                next_run = next_run.replace(hour=hour, minute=minute)
+            
+            # Validate date is in future
+            if next_run <= now:
+                return {"status": "error", "message": f"Date {specific_date} {time or '00:00'} is in the past!"}
+        
+        # ONE-TIME schedules
         
         # --- Calculate next run time ---
         if schedule.startswith("in_") and schedule.endswith("_minutes"):
@@ -369,17 +422,100 @@ def create_scheduled_task(
             next_run = now + timedelta(weeks=weeks)
         elif schedule == "hourly":
             next_run = now + timedelta(hours=1)
-        elif schedule == "daily" and time:
-            hour, minute = map(int, time.split(":"))
-            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if next_run <= now:
-                next_run += timedelta(days=1)
+        
+        # DAILY with specific time
+        elif schedule == "daily":
+            if time:
+                hour, minute = map(int, time.split(":"))
+                next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if next_run <= now:
+                    next_run += timedelta(days=1)
+            else:
+                next_run = now + timedelta(days=1)
+        
+        # WEEKLY with specific day and time
         elif schedule == "weekly":
-            next_run = now + timedelta(weeks=1)
+            if day_of_week:
+                days_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+                           "friday": 4, "saturday": 5, "sunday": 6}
+                target_day = days_map.get(day_of_week.lower())
+                if target_day is None:
+                    return {"status": "error", "message": f"Invalid day_of_week: {day_of_week}"}
+                
+                current_day = now.weekday()
+                days_ahead = target_day - current_day
+                if days_ahead <= 0:
+                    days_ahead += 7
+                
+                next_run = now + timedelta(days=days_ahead)
+                if time:
+                    hour, minute = map(int, time.split(":"))
+                    next_run = next_run.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if days_ahead == 0 and next_run <= now:
+                        next_run += timedelta(weeks=1)
+            else:
+                next_run = now + timedelta(weeks=1)
+        
+        # MONTHLY with specific day and time
         elif schedule == "monthly":
-            next_run = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+            if day_of_month:
+                if day_of_month < 1 or day_of_month > 31:
+                    return {"status": "error", "message": "day_of_month must be between 1 and 31"}
+                
+                next_run = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                while True:
+                    try:
+                        next_run = next_run.replace(day=day_of_month)
+                        break
+                    except ValueError:
+                        if next_run.month == 12:
+                            next_run = next_run.replace(year=next_run.year + 1, month=1)
+                        else:
+                            next_run = next_run.replace(month=next_run.month + 1)
+                
+                if time:
+                    hour, minute = map(int, time.split(":"))
+                    next_run = next_run.replace(hour=hour, minute=minute)
+                
+                if next_run <= now:
+                    if next_run.month == 12:
+                        next_run = next_run.replace(year=next_run.year + 1, month=1)
+                    else:
+                        next_run = next_run.replace(month=next_run.month + 1)
+                    while True:
+                        try:
+                            next_run = next_run.replace(day=day_of_month)
+                            break
+                        except ValueError:
+                            if next_run.month == 12:
+                                next_run = next_run.replace(year=next_run.year + 1, month=1)
+                            else:
+                                next_run = next_run.replace(month=next_run.month + 1)
+            else:
+                next_run = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+        
+        # YEARLY with specific month, day, and time
         elif schedule == "yearly":
-            next_run = now.replace(year=now.year + 1)
+            if month and day_of_month:
+                if month < 1 or month > 12:
+                    return {"status": "error", "message": "month must be between 1 and 12"}
+                if day_of_month < 1 or day_of_month > 31:
+                    return {"status": "error", "message": "day_of_month must be between 1 and 31"}
+                
+                try:
+                    next_run = now.replace(month=month, day=day_of_month, hour=0, minute=0, second=0, microsecond=0)
+                except ValueError:
+                    return {"status": "error", "message": f"Invalid date: month={month}, day={day_of_month}"}
+                
+                if time:
+                    hour, minute = map(int, time.split(":"))
+                    next_run = next_run.replace(hour=hour, minute=minute)
+                
+                if next_run <= now:
+                    next_run = next_run.replace(year=now.year + 1)
+            else:
+                next_run = now.replace(year=now.year + 1)
+        
         elif schedule == "minutely":
             next_run = now + timedelta(minutes=1)
         else:
@@ -391,6 +527,10 @@ def create_scheduled_task(
             "description": description,
             "schedule": schedule,
             "time": time,
+            "specific_date": specific_date,
+            "day_of_week": day_of_week,
+            "day_of_month": day_of_month,
+            "month": month,
             "action_type": action_type,
             "action_target": action_target or DEFAULT_USER_ID,
             "action_template": action_template,
@@ -411,9 +551,23 @@ def create_scheduled_task(
         elif action_type == "channel_post":
             action_desc = f"Discord Channel → {action_target}"
         
+        # Build schedule description
+        schedule_desc = schedule
+        if specific_date:
+            schedule_desc = f"on {specific_date}"
+        if day_of_week:
+            schedule_desc += f" ({day_of_week}s)"
+        if day_of_month and not specific_date:
+            schedule_desc += f" (day {day_of_month})"
+        if month and not specific_date:
+            months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            schedule_desc += f" ({months[month]})"
+        if time:
+            schedule_desc += f" at {time}"
+        
         formatted_message = f"""📋 **Task: {task_name}**
 ├─ Description: {description}
-├─ Schedule: {schedule} ({task_type})
+├─ Schedule: {schedule_desc} ({task_type})
 ├─ Next Run: {next_run.strftime('%Y-%m-%d %H:%M')}
 └─ Action: {action_desc}
 
@@ -445,7 +599,8 @@ def create_scheduled_task(
             "message": f"{task_type} task '{task_name}' created and stored!",
             "task_data": task_data,
             "message_id": message_id,
-            "next_run": next_run.strftime('%Y-%m-%d %H:%M:%S')
+            "next_run": next_run.strftime('%Y-%m-%d %H:%M:%S'),
+            "schedule_description": schedule_desc
         }
         
     except Exception as e:
@@ -468,18 +623,20 @@ Result → Task created, will trigger in 30 minutes ✅
 
 **Schedule Formats:**
 
-| Schedule | Example | Description |
-|----------|---------|-------------|
-| `in_X_minutes` | `in_30_minutes` | One-time, runs in 30 minutes |
-| `in_X_hours` | `in_2_hours` | One-time, runs in 2 hours |
-| `tomorrow_at_HH:MM` | `tomorrow_at_09:00` | One-time, tomorrow at 9am |
-| `daily` | `daily` (with `time="09:00"`) | Recurring, every day at 9am |
-| `hourly` | `hourly` | Recurring, every hour |
-| `every_X_minutes` | `every_30_minutes` | Recurring, every 30 minutes |
-| `every_X_hours` | `every_3_hours` | Recurring, every 3 hours |
-| `every_X_days` | `every_7_days` | Recurring, every 7 days |
-| `weekly` | `weekly` | Recurring, every week |
-| `monthly` | `monthly` | Recurring, every month |
+| Schedule | Parameters Needed | Example | Description |
+|----------|------------------|---------|-------------|
+| `on_date` | `specific_date`, `time` | Dec 25 2025 at 10am | One-time, specific date |
+| `in_X_minutes` | - | `in_30_minutes` | One-time, runs in 30 minutes |
+| `in_X_hours` | - | `in_2_hours` | One-time, runs in 2 hours |
+| `tomorrow_at_HH:MM` | - | `tomorrow_at_09:00` | One-time, tomorrow at 9am |
+| `daily` | `time` | Every day at 9am | Recurring daily |
+| `weekly` | `day_of_week`, `time` | Every Monday at 9am | Recurring weekly |
+| `monthly` | `day_of_month`, `time` | Every 15th at 10am | Recurring monthly |
+| `yearly` | `month`, `day_of_month`, `time` | Every Apr 15 at 9am | Recurring yearly |
+| `hourly` | - | Every hour | Recurring hourly |
+| `every_X_minutes` | - | `every_30_minutes` | Recurring, every 30 min |
+| `every_X_hours` | - | `every_3_hours` | Recurring, every 3 hours |
+| `every_X_days` | - | `every_7_days` | Recurring, every 7 days |
 
 ---
 
