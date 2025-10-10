@@ -365,7 +365,7 @@ async function sendMessage(
   discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>,
   messageType: MessageType
 ) {
-  const { author: { username: senderName, id: senderId }, content: message } =
+  const { author: { username: senderName, id: senderId }, content: message, channel } =
     discordMessageObject;
 
   if (!AGENT_ID) {
@@ -374,6 +374,15 @@ async function sendMessage(
       ? `Beep boop. My configuration is not set up properly. Please message me after I get fixed 👾`
       : "";
   }
+
+  // IMPROVEMENT: Extract channel context so agent knows WHERE the message came from
+  const channelId = channel.id;
+  const channelType = (channel as any).type; // 0=text, 1=DM, 5=announcement, etc
+  const isDM = channelType === 1;
+  const channelName = isDM ? "DM" : ((channel as any).name || "unknown-channel");
+  const channelContext = isDM 
+    ? `DM`
+    : `#${channelName} (channel_id=${channelId})`;
 
   // We include a sender receipt so that agent knows which user sent the message
   // We also include the Discord ID so that the agent can tag the user with @
@@ -386,12 +395,12 @@ async function sendMessage(
     name: USE_SENDER_PREFIX ? undefined : senderNameReceipt,
     content: USE_SENDER_PREFIX
       ? messageType === MessageType.MENTION
-        ? `[${senderNameReceipt} sent a message mentioning you] ${message}`
+        ? `[${senderNameReceipt} mentioned you in ${channelContext}] ${message}`
         : messageType === MessageType.REPLY
-          ? `[${senderNameReceipt} replied to you] ${message}`
+          ? `[${senderNameReceipt} replied to you in ${channelContext}] ${message}`
           : messageType === MessageType.DM
             ? `[${senderNameReceipt} sent you a direct message] ${message}`
-            : `[${senderNameReceipt} sent a message to the channel] ${message}`
+            : `[${senderNameReceipt} sent a message in ${channelContext}] ${message}`
       : message
   };
 
