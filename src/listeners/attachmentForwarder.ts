@@ -14,6 +14,9 @@ const REQUEST_TIMEOUT = 20000; // 20s
 const SAFE_TARGET_BYTES = 4 * 1024 * 1024; // 4MB safe target
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB absolute limit
 
+// CRITICAL: Letta API has 2000px dimension limit for multi-image requests!
+const LETTA_MAX_DIMENSION = 2000; // px - any dimension exceeding this will cause 400 error
+
 // Rate limiting map: userId -> timestamp
 const processingUsers = new Map<string, number>();
 
@@ -242,22 +245,46 @@ async function downloadImage(url: string, index: number, total: number): Promise
   }
 }
 
-// Helper: Compress image buffer with adaptive strategy
-async function compressImage(buffer: Buffer, mediaType: string, index: number, total: number): Promise<{ buffer: Buffer; mediaType: string } | null> {
+// Helper: Compress image buffer with adaptive strategy + dimension checking
+async function compressImage(buffer: Buffer, mediaType: string, index: number, total: number, forceDimensionCheck: boolean = false): Promise<{ buffer: Buffer; mediaType: string } | null> {
   const sharpMod = await loadSharp();
   if (!sharpMod) {
     console.warn(`⚠️ [${index + 1}/${total}] sharp not available; cannot compress`);
     return null;
   }
 
+  // CRITICAL: Get image metadata to check dimensions
+  let metadata;
+  try {
+    metadata = await createSharpPipeline(sharpMod, buffer)?.metadata();
+  } catch (err) {
+    console.error(`❌ [${index + 1}/${total}] Failed to read image metadata:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+
+  const originalWidth = metadata?.width || 0;
+  const originalHeight = metadata?.height || 0;
+  const exceedsDimensions = originalWidth > LETTA_MAX_DIMENSION || originalHeight > LETTA_MAX_DIMENSION;
+
+  console.log(`📐 [${index + 1}/${total}] Original: ${originalWidth}x${originalHeight}px, ${Math.round(buffer.length / 1024)}KB`);
+
+  // If dimensions are fine AND size is fine, skip compression
+  if (!exceedsDimensions && buffer.length <= SAFE_TARGET_BYTES && !forceDimensionCheck) {
+    console.log(`✅ [${index + 1}/${total}] No compression needed`);
+    return { buffer, mediaType };
+  }
+
   let buf = buffer;
-  let width = 1400;
+  // Start with Letta-safe dimensions
+  let width = Math.min(LETTA_MAX_DIMENSION, originalWidth);
   let quality = 70;
   let fmt: 'webp' | 'jpeg' = 'webp';
   let attempts = 0;
   const maxAttempts = 10;
+  let needsResize = exceedsDimensions; // Track if we still need dimension fixes
 
-  while (buf.length > SAFE_TARGET_BYTES && attempts < maxAttempts) {
+  // Compress if size OR dimensions exceed limits
+  while ((buf.length > SAFE_TARGET_BYTES || needsResize) && attempts < maxAttempts) {
     const pipeline = createSharpPipeline(sharpMod, buf)?.rotate().resize({ width, withoutEnlargement: true });
     if (!pipeline) {
       console.warn(`⚠️ [${index + 1}/${total}] Failed to create pipeline at attempt ${attempts + 1}`);
@@ -273,6 +300,12 @@ async function compressImage(buffer: Buffer, mediaType: string, index: number, t
       
       buf = out;
       mediaType = fmt === 'webp' ? 'image/webp' : 'image/jpeg';
+      
+      // After first resize, dimensions are fixed
+      if (needsResize && width <= LETTA_MAX_DIMENSION) {
+        needsResize = false;
+        console.log(`✅ [${index + 1}/${total}] Dimensions now within Letta limit (${width}px)`);
+      }
 
       if (buf.length > SAFE_TARGET_BYTES) {
         // Adaptive compression strategy
@@ -365,20 +398,30 @@ async function forwardImagesToLetta(
 
         let { buffer, mediaType } = downloaded;
 
-        // Compress if needed
-        if (buffer.length > SAFE_TARGET_BYTES) {
-          console.log(`🗜️ [${i + 1}/${urls.length}] Image exceeds safe limit, compressing...`);
-          const compressed = await compressImage(buffer, mediaType, i, urls.length);
+        // CRITICAL: For multi-image requests, ALWAYS check dimensions (Letta 2000px limit!)
+        const isMultiImage = urls.length > 1;
+        const needsCompression = buffer.length > SAFE_TARGET_BYTES || isMultiImage;
+        
+        if (needsCompression) {
+          if (buffer.length > SAFE_TARGET_BYTES) {
+            console.log(`🗜️ [${i + 1}/${urls.length}] Image exceeds safe size limit, compressing...`);
+          } else {
+            console.log(`📐 [${i + 1}/${urls.length}] Checking dimensions for multi-image request...`);
+          }
+          
+          const compressed = await compressImage(buffer, mediaType, i, urls.length, isMultiImage);
           
           if (!compressed) {
-            console.warn(`⚠️ [${i + 1}/${urls.length}] Compression failed, skipping image`);
+            console.warn(`⚠️ [${i + 1}/${urls.length}] Compression/resize failed, skipping image`);
             skippedCount++;
             continue;
           }
 
           buffer = compressed.buffer;
           mediaType = compressed.mediaType;
-          compressedCount++;
+          if (compressed.buffer.length !== downloaded.buffer.length || isMultiImage) {
+            compressedCount++;
+          }
         }
 
         // Convert to base64 and add to payload

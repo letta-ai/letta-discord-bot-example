@@ -450,21 +450,43 @@ async function sendMessage(
         return agentMessageResponse || "";
       } catch (streamErr) {
         console.warn('⚠️  Streaming failed, attempting non-stream fallback', streamErr);
-        const nonStream = await client.agents.messages.create(AGENT_ID, { messages: [lettaMessage] });
-        const text = extractTextFromResponse(nonStream);
-        console.log(`ℹ️ Extracted text length from fallback non-stream: ${text.length}`);
-        if (text.trim()) {
-          const limit = 1900;
-          const chunks = chunkText(text, limit);
-          console.log(`ℹ️ Sending chunks to target: ${discordMessageObject.channel?.id || discordMessageObject.id || 'unknown'}`);
-          await sendChunkSeries(discordMessageObject, chunks);
+        try {
+          const nonStream = await client.agents.messages.create(AGENT_ID, { messages: [lettaMessage] });
+          const text = extractTextFromResponse(nonStream);
+          console.log(`ℹ️ Extracted text length from fallback non-stream: ${text.length}`);
+          if (text.trim()) {
+            const limit = 1900;
+            const chunks = chunkText(text, limit);
+            console.log(`ℹ️ Sending chunks to target: ${discordMessageObject.channel?.id || discordMessageObject.id || 'unknown'}`);
+            await sendChunkSeries(discordMessageObject, chunks);
+            const end = performance.now();
+            console.log(`⏱️  Round-trip fallback non-stream: ${(end - start).toFixed(0)} ms`);
+            return "";
+          }
           const end = performance.now();
-          console.log(`⏱️  Round-trip fallback non-stream: ${(end - start).toFixed(0)} ms`);
+          console.log(`⏱️  Round-trip fallback (empty): ${(end - start).toFixed(0)} ms`);
+          return "";
+        } catch (fallbackErr) {
+          console.error('❌ Non-stream fallback also failed:', fallbackErr);
+          const errMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          if (/timeout|ETIMEDOUT/i.test(errMsg)) {
+            console.error('⚠️  Letta request timed out (both stream and non-stream).');
+            if (SURFACE_ERRORS) {
+              await discordMessageObject.reply('⏰ Request timed out - Letta API is slow right now. Please try again in a moment.');
+            }
+          } else if (/terminated|socket|ECONNREFUSED|ECONNRESET/i.test(errMsg)) {
+            console.error('⚠️  Connection error - network issues or Letta API down.');
+            if (SURFACE_ERRORS) {
+              await discordMessageObject.reply('🔌 Connection lost to Letta API. Please try again later.');
+            }
+          } else {
+            console.error('⚠️  Unknown error type:', errMsg);
+            if (SURFACE_ERRORS) {
+              await discordMessageObject.reply('❌ Something went wrong communicating with Letta. Please try again.');
+            }
+          }
           return "";
         }
-        const end = performance.now();
-        console.log(`⏱️  Round-trip fallback (empty): ${(end - start).toFixed(0)} ms`);
-        return "";
       }
     }
   } catch (error) {
