@@ -100,7 +100,10 @@ const processStream = async (
 async function fetchConversationHistory(
   discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<string> {
+  console.log(`📚 CONTEXT_MESSAGE_COUNT: ${CONTEXT_MESSAGE_COUNT}`);
+
   if (CONTEXT_MESSAGE_COUNT <= 0) {
+    console.log(`📚 Conversation history disabled (CONTEXT_MESSAGE_COUNT=${CONTEXT_MESSAGE_COUNT})`);
     return '';
   }
 
@@ -111,7 +114,10 @@ async function fetchConversationHistory(
       before: discordMessageObject.id
     });
 
+    console.log(`📚 Fetched ${messages.size} messages for conversation history`);
+
     if (messages.size === 0) {
+      console.log(`📚 No messages found for conversation history`);
       return '';
     }
 
@@ -120,7 +126,10 @@ async function fetchConversationHistory(
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
       .filter(msg => !msg.content.startsWith('!')); // Exclude messages starting with !
 
+    console.log(`📚 ${sortedMessages.length} messages after filtering (excluded ! commands)`);
+
     if (sortedMessages.length === 0) {
+      console.log(`📚 No messages remaining after filtering`);
       return '';
     }
 
@@ -131,9 +140,11 @@ async function fetchConversationHistory(
       return `- ${author}: ${content}`;
     });
 
-    return `[Recent conversation context:]\n${historyLines.join('\n')}\n[End context]\n\n`;
+    const historyBlock = `[Recent conversation context:]\n${historyLines.join('\n')}\n[End context]\n\n`;
+    console.log(`📚 Conversation history formatted:\n${historyBlock}`);
+    return historyBlock;
   } catch (error) {
-    console.error('Error fetching conversation history:', error);
+    console.error('📚 Error fetching conversation history:', error);
     return '';
   }
 }
@@ -203,12 +214,16 @@ async function sendMessage(
   if (guild === null) {
     // DM - no channel name needed
     channelContext = '';
+    console.log(`📍 Channel context: DM (no channel name)`);
   } else if ('name' in channel && channel.name) {
     // Guild channel with a name
     channelContext = ` in #${channel.name}`;
+    console.log(`📍 Channel context: #${channel.name}`);
   } else {
     // Fallback if channel doesn't have a name
     channelContext = ` in channel (id=${channel.id})`;
+    console.log(`📍 Channel context: channel ID ${channel.id} (no name property found)`);
+    console.log(`📍 Channel object keys:`, Object.keys(channel));
   }
 
   // We include a sender receipt so that agent knows which user sent the message
@@ -247,16 +262,20 @@ async function sendMessage(
   // Typing indicator: pulse now and every 8 s until cleaned up (only if we should respond)
   let typingInterval: NodeJS.Timeout | undefined;
   if (shouldRespond) {
+    console.log(`⌨️  Starting typing indicator interval (shouldRespond=true)`);
     void discordMessageObject.channel.sendTyping();
     typingInterval = setInterval(() => {
       void discordMessageObject.channel
         .sendTyping()
         .catch(err => console.error('Error refreshing typing indicator:', err));
     }, 8000);
+  } else {
+    console.log(`⌨️  No typing indicator (shouldRespond=false)`);
   }
 
   try {
-    console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID}): ${JSON.stringify(lettaMessage)}`);
+    console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
+    console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
     const response = await client.agents.messages.createStream(AGENT_ID, {
       messages: [lettaMessage]
     });

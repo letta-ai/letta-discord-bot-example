@@ -173,8 +173,12 @@ client.on('messageCreate', async (message) => {
 
     // Check if we can respond in this channel before showing typing indicator
     const canRespond = shouldRespondInChannel(message.channel.id);
+    console.log(`💬 Can respond in this channel: ${canRespond} (channel=${message.channel.id}, responseChannel=${RESPONSE_CHANNEL_ID || 'any'})`);
     if (canRespond) {
+      console.log(`⌨️  Sending typing indicator...`);
       await message.channel.sendTyping();
+    } else {
+      console.log(`⌨️  Skipping typing indicator (observation-only channel)`);
     }
 
     let msgContent = message.content;
