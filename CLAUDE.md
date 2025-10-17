@@ -33,6 +33,7 @@ Copy `.env.template` to `.env` and configure:
   - `DISCORD_RESPONSE_CHANNEL_ID`: Only respond in this channel (agent sees all messages but only replies here)
 - **Behavior flags**: `RESPOND_TO_DMS`, `RESPOND_TO_MENTIONS`, `RESPOND_TO_BOTS`, `RESPOND_TO_GENERIC`
 - **Timer settings**: `ENABLE_TIMER`, `TIMER_INTERVAL_MINUTES`, `FIRING_PROBABILITY`
+- **Message batching**: `MESSAGE_BATCH_ENABLED`, `MESSAGE_BATCH_SIZE`, `MESSAGE_BATCH_TIMEOUT_MS`
 
 ## Architecture
 
@@ -103,6 +104,22 @@ The bot supports two types of channel filtering:
   - Agent only sends visible responses in the specified channel
   - No typing indicators or intermediate messages shown outside response channel
   - Useful for having the agent observe multiple channels but only speak in one
+
+### Message Batching
+
+When enabled, the bot accumulates messages before sending to the agent:
+- **Per-channel buffers**: Each channel has its own message batch
+- **Drain conditions**: Batch drains when reaching `MESSAGE_BATCH_SIZE` messages OR `MESSAGE_BATCH_TIMEOUT_MS` timeout
+- **Batch format**: All messages formatted as numbered list with user context
+  ```
+  [Batch of 5 messages from #general]
+  1. [username (id=123) mentioned you] message text
+  2. [username2 (id=456)] another message
+  3. [username (id=123)] follow up
+  ...
+  ```
+- **Benefits**: Reduces API calls, provides better conversation context, natural flow
+- **Agent response**: Agent sees entire batch and can respond once to all messages
 
 ### Timer Feature
 

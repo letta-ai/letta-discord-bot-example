@@ -16,6 +16,9 @@ const MESSAGE_REPLY_TRUNCATE_LENGTH = 100;  // how many chars to include
 const ENABLE_TIMER = process.env.ENABLE_TIMER === 'true';
 const TIMER_INTERVAL_MINUTES = parseInt(process.env.TIMER_INTERVAL_MINUTES || '15', 10);
 const FIRING_PROBABILITY = parseFloat(process.env.FIRING_PROBABILITY || '0.1');
+const MESSAGE_BATCH_ENABLED = process.env.MESSAGE_BATCH_ENABLED === 'true';
+const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
+const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
 
 function truncateMessage(message: string, maxLength: number): string {
     if (message.length > maxLength) {
@@ -37,7 +40,122 @@ const client = new Client({
 // Discord Bot Ready Event
 client.once('ready', () => {
   console.log(`🤖 Logged in as ${client.user?.tag}!`);
+  if (MESSAGE_BATCH_ENABLED) {
+    console.log(`📦 Message batching enabled: ${MESSAGE_BATCH_SIZE} messages or ${MESSAGE_BATCH_TIMEOUT_MS}ms timeout`);
+  }
 });
+
+// Message batching infrastructure
+interface BatchedMessage {
+  message: OmitPartialGroupDMChannel<Message<boolean>>;
+  messageType: MessageType;
+  timestamp: number;
+}
+
+const channelMessageBuffers = new Map<string, BatchedMessage[]>();
+const channelBatchTimers = new Map<string, NodeJS.Timeout>();
+
+async function drainMessageBatch(channelId: string) {
+  const buffer = channelMessageBuffers.get(channelId);
+  const timer = channelBatchTimers.get(channelId);
+
+  if (timer) {
+    clearTimeout(timer);
+    channelBatchTimers.delete(channelId);
+  }
+
+  if (!buffer || buffer.length === 0) {
+    return;
+  }
+
+  console.log(`📦 Draining batch for channel ${channelId}: ${buffer.length} messages`);
+
+  // Get the last message to use as the reply target
+  const lastMessage = buffer[buffer.length - 1].message;
+  const canRespond = shouldRespondInChannel(channelId);
+
+  // Format all messages in batch
+  const batchedContent = buffer.map((bm, idx) => {
+    const { message, messageType } = bm;
+    const username = message.author.username;
+    const userId = message.author.id;
+    const content = message.content;
+
+    let prefix = '';
+    if (messageType === MessageType.MENTION) {
+      prefix = `[${username} (id=${userId}) mentioned you]`;
+    } else if (messageType === MessageType.REPLY) {
+      prefix = `[${username} (id=${userId}) replied to you]`;
+    } else if (messageType === MessageType.DM) {
+      prefix = `[${username} (id=${userId}) sent you a DM]`;
+    } else {
+      prefix = `[${username} (id=${userId})]`;
+    }
+
+    return `${idx + 1}. ${prefix} ${content}`;
+  }).join('\n');
+
+  const channelName = 'name' in lastMessage.channel && lastMessage.channel.name
+    ? `#${lastMessage.channel.name}`
+    : `channel ${channelId}`;
+
+  const batchMessage = `[Batch of ${buffer.length} messages from ${channelName}]\n${batchedContent}`;
+
+  console.log(`📦 Batch content:\n${batchMessage}`);
+
+  try {
+    // Send batch to agent using the last message as context
+    const msg = await sendMessage(lastMessage, buffer[buffer.length - 1].messageType, canRespond, batchMessage);
+
+    if (msg !== "" && canRespond) {
+      await lastMessage.reply(msg);
+      console.log(`📦 Batch response sent: ${msg}`);
+    } else if (msg !== "" && !canRespond) {
+      console.log(`📦 Agent generated response but not responding (not in response channel): ${msg}`);
+    }
+  } catch (error) {
+    console.error("🛑 Error processing batch:", error);
+  }
+
+  // Clear the buffer
+  channelMessageBuffers.delete(channelId);
+}
+
+function addMessageToBatch(message: OmitPartialGroupDMChannel<Message<boolean>>, messageType: MessageType) {
+  const channelId = message.channel.id;
+
+  if (!channelMessageBuffers.has(channelId)) {
+    channelMessageBuffers.set(channelId, []);
+  }
+
+  const buffer = channelMessageBuffers.get(channelId)!;
+  buffer.push({
+    message,
+    messageType,
+    timestamp: Date.now()
+  });
+
+  console.log(`📦 Added message to batch (${buffer.length}/${MESSAGE_BATCH_SIZE})`);
+
+  // Check if we should drain due to size
+  if (buffer.length >= MESSAGE_BATCH_SIZE) {
+    console.log(`📦 Batch size limit reached, draining...`);
+    drainMessageBatch(channelId);
+    return;
+  }
+
+  // Set/reset the timeout
+  if (channelBatchTimers.has(channelId)) {
+    clearTimeout(channelBatchTimers.get(channelId)!);
+  }
+
+  const timeout = setTimeout(() => {
+    console.log(`📦 Batch timeout reached, draining...`);
+    drainMessageBatch(channelId);
+  }, MESSAGE_BATCH_TIMEOUT_MS);
+
+  channelBatchTimers.set(channelId, timeout);
+}
 
 // Helper function to check if bot should respond in this channel
 function shouldRespondInChannel(channelId: string): boolean {
@@ -51,6 +169,13 @@ function shouldRespondInChannel(channelId: string): boolean {
 
 // Helper function to send a message and receive a response
 async function processAndSendMessage(message: OmitPartialGroupDMChannel<Message<boolean>>, messageType: MessageType) {
+  // If batching is enabled, add to batch instead of processing immediately
+  if (MESSAGE_BATCH_ENABLED) {
+    addMessageToBatch(message, messageType);
+    return;
+  }
+
+  // Otherwise, process immediately (original behavior)
   try {
     const canRespond = shouldRespondInChannel(message.channel.id);
     const msg = await sendMessage(message, messageType, canRespond);
@@ -199,6 +324,13 @@ client.on('messageCreate', async (message) => {
         }
     }
 
+    // If batching is enabled, add to batch instead of processing immediately
+    if (MESSAGE_BATCH_ENABLED) {
+      addMessageToBatch(message, messageType);
+      return;
+    }
+
+    // Otherwise, process immediately (original behavior)
     const msg = await sendMessage(message, messageType, canRespond);
     if (msg !== "" && canRespond) {
       await message.reply(msg);

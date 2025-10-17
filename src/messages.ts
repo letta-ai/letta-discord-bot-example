@@ -194,7 +194,8 @@ async function sendTimerMessage(channel?: { send: (content: string) => Promise<a
 async function sendMessage(
   discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>,
   messageType: MessageType,
-  shouldRespond: boolean = true
+  shouldRespond: boolean = true,
+  batchedMessage?: string
 ) {
   const { author: { username: senderName, id: senderId }, content: message, channel, guild } =
     discordMessageObject;
@@ -232,7 +233,16 @@ async function sendMessage(
 
   // Build the message content with history prepended
   let messageContent: string;
-  if (USE_SENDER_PREFIX) {
+
+  // If this is a batched message, use the batch content instead
+  if (batchedMessage) {
+    messageContent = batchedMessage;
+
+    // Add observation notice if agent cannot respond in this channel
+    if (!shouldRespond && channelContext) {
+      messageContent += `\n\n[IMPORTANT: You are only observing these messages. You cannot respond in this channel. Your response will not be sent to Discord.]`;
+    }
+  } else if (USE_SENDER_PREFIX) {
     const currentMessagePrefix = messageType === MessageType.MENTION
       ? `[${senderNameReceipt} sent a message${channelContext} mentioning you] ${message}`
       : messageType === MessageType.REPLY

@@ -165,6 +165,10 @@ The following environment variables can be set in the `.env` file:
 * `TIMER_INTERVAL_MINUTES`: Maximum interval range in minutes for the random timer (defaults to every 15 minutes).
 * `FIRING_PROBABILITY`: Probability of the timer firing (0.0 to 1.0), defaults to 0.1 (10%).
 
+* `MESSAGE_BATCH_ENABLED`: Enable message batching to accumulate multiple messages before sending to agent (default: false).
+* `MESSAGE_BATCH_SIZE`: Maximum number of messages to batch before auto-draining (default: 10).
+* `MESSAGE_BATCH_TIMEOUT_MS`: Milliseconds to wait before auto-draining batch (default: 30000 / 30 seconds).
+
 For more settings (including options to enable/disable DM interactions, reply to non-directed messages, etc.), view the [`.env.template`](/.env.template) file provided.
 
 ### 👾 Create your Letta agent
