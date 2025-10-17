@@ -170,15 +170,20 @@ client.on('messageCreate', async (message) => {
   // Check if the bot is mentioned or if the message is a reply
   if (RESPOND_TO_MENTIONS && (message.mentions.has(client.user || '') || message.reference)) {
     console.log(`📩 Received message from ${message.author.username}: ${message.content}`);
-    await message.channel.sendTyping();
-    
+
+    // Check if we can respond in this channel before showing typing indicator
+    const canRespond = shouldRespondInChannel(message.channel.id);
+    if (canRespond) {
+      await message.channel.sendTyping();
+    }
+
     let msgContent = message.content;
     let messageType = MessageType.MENTION; // Default to mention
 
     // If it's a reply, fetch the original message and check if it's to the bot
     if (message.reference && message.reference.messageId) {
         const originalMessage = await message.channel.messages.fetch(message.reference.messageId);
-        
+
         // Check if the original message was from the bot
         if (originalMessage.author.id === client.user?.id) {
           // This is a reply to the bot
@@ -189,8 +194,7 @@ client.on('messageCreate', async (message) => {
           messageType = message.mentions.has(client.user || '') ? MessageType.MENTION : MessageType.GENERIC;
         }
     }
-    
-    const canRespond = shouldRespondInChannel(message.channel.id);
+
     const msg = await sendMessage(message, messageType, canRespond);
     if (msg !== "" && canRespond) {
       await message.reply(msg);

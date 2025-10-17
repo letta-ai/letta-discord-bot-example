@@ -225,7 +225,13 @@ async function sendMessage(
         : messageType === MessageType.DM
           ? `[${senderNameReceipt} sent you a direct message] ${message}`
           : `[${senderNameReceipt} sent a message${channelContext}] ${message}`;
-    messageContent = conversationHistory + currentMessagePrefix;
+
+    // Add observation notice if agent cannot respond in this channel
+    const observationNotice = !shouldRespond && channelContext
+      ? `\n\n[IMPORTANT: You are only observing this message. You cannot respond in this channel. Your response will not be sent to Discord.]`
+      : '';
+
+    messageContent = conversationHistory + currentMessagePrefix + observationNotice;
   } else {
     messageContent = conversationHistory + message;
   }
