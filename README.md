@@ -151,11 +151,13 @@ The following environment variables can be set in the `.env` file:
 * `LETTA_API_KEY`: The password of your Letta server (if you self-deployed a server). Not applicable if you are not using a password (see [docs](https://docs.letta.com/guides/server/docker#password-protection-advanced)).
 * `LETTA_BASE_URL`: The base URL of your Letta server. Defaults to `https://api.letta.com` (Letta Cloud). If you're using a self-hosted Letta server, this is usually `http://localhost:8283`.
 * `LETTA_AGENT_ID`: The ID of the Letta agent to use for the bot.
+* `LETTA_CONTEXT_MESSAGE_COUNT`: Number of recent messages to include as conversation context (default: 5, set to 0 to disable).
 
 * `APP_ID`: The ID of your Discord application.
 * `DISCORD_TOKEN`: The bot token for your Discord bot.
 * `PUBLIC_KEY`: The public key for your Discord bot.
-* `DISCORD_CHANNEL_ID`: Set this if you want the bot to only respond to messages (listen) in a specific channel.
+* `DISCORD_CHANNEL_ID`: Set this if you want the bot to only listen to messages in a specific channel (ignores all other channels).
+* `DISCORD_RESPONSE_CHANNEL_ID`: Set this if you want the bot to only respond in a specific channel (agent sees all messages but only replies here).
 
 * `PORT`: The port to run the app on. Default is `3001`.
 

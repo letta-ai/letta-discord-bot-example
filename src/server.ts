@@ -10,7 +10,8 @@ const RESPOND_TO_DMS = process.env.RESPOND_TO_DMS === 'true';
 const RESPOND_TO_MENTIONS = process.env.RESPOND_TO_MENTIONS === 'true';
 const RESPOND_TO_BOTS = process.env.RESPOND_TO_BOTS === 'true';
 const RESPOND_TO_GENERIC = process.env.RESPOND_TO_GENERIC === 'true';
-const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;  // Optional env var,
+const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;  // Optional: only listen in this channel
+const RESPONSE_CHANNEL_ID = process.env.DISCORD_RESPONSE_CHANNEL_ID;  // Optional: only respond in this channel
 const MESSAGE_REPLY_TRUNCATE_LENGTH = 100;  // how many chars to include
 const ENABLE_TIMER = process.env.ENABLE_TIMER === 'true';
 const TIMER_INTERVAL_MINUTES = parseInt(process.env.TIMER_INTERVAL_MINUTES || '15', 10);
@@ -38,13 +39,26 @@ client.once('ready', () => {
   console.log(`🤖 Logged in as ${client.user?.tag}!`);
 });
 
+// Helper function to check if bot should respond in this channel
+function shouldRespondInChannel(channelId: string): boolean {
+  // If RESPONSE_CHANNEL_ID is not set, respond everywhere
+  if (!RESPONSE_CHANNEL_ID) {
+    return true;
+  }
+  // If RESPONSE_CHANNEL_ID is set, only respond in that channel
+  return channelId === RESPONSE_CHANNEL_ID;
+}
+
 // Helper function to send a message and receive a response
 async function processAndSendMessage(message: OmitPartialGroupDMChannel<Message<boolean>>, messageType: MessageType) {
   try {
-    const msg = await sendMessage(message, messageType)
-    if (msg !== "") {
+    const canRespond = shouldRespondInChannel(message.channel.id);
+    const msg = await sendMessage(message, messageType, canRespond);
+    if (msg !== "" && canRespond) {
       await message.reply(msg);
       console.log(`Message sent: ${msg}`);
+    } else if (msg !== "" && !canRespond) {
+      console.log(`Agent generated response but not responding (not in response channel): ${msg}`);
     }
   } catch (error) {
     console.error("🛑 Error processing and sending message:", error);
@@ -176,9 +190,12 @@ client.on('messageCreate', async (message) => {
         }
     }
     
-    const msg = await sendMessage(message, messageType);
-    if (msg !== "") {
+    const canRespond = shouldRespondInChannel(message.channel.id);
+    const msg = await sendMessage(message, messageType, canRespond);
+    if (msg !== "" && canRespond) {
       await message.reply(msg);
+    } else if (msg !== "" && !canRespond) {
+      console.log(`Agent generated response but not responding (not in response channel): ${msg}`);
     }
     return;
   }

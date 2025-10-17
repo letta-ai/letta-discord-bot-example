@@ -11,6 +11,7 @@ const client = new LettaClient({
 const AGENT_ID = process.env.LETTA_AGENT_ID;
 const USE_SENDER_PREFIX = process.env.LETTA_USE_SENDER_PREFIX === 'true';
 const SURFACE_ERRORS = process.env.SURFACE_ERRORS === 'true';
+const CONTEXT_MESSAGE_COUNT = parseInt(process.env.LETTA_CONTEXT_MESSAGE_COUNT || '5', 10);
 
 enum MessageType {
   DM = "DM",
@@ -95,6 +96,48 @@ const processStream = async (
   return agentMessageResponse;
 }
 
+// Helper function to fetch and format conversation history
+async function fetchConversationHistory(
+  discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<string> {
+  if (CONTEXT_MESSAGE_COUNT <= 0) {
+    return '';
+  }
+
+  try {
+    // Fetch recent messages from the channel
+    const messages = await discordMessageObject.channel.messages.fetch({
+      limit: CONTEXT_MESSAGE_COUNT + 1, // +1 to account for the current message
+      before: discordMessageObject.id
+    });
+
+    if (messages.size === 0) {
+      return '';
+    }
+
+    // Sort messages chronologically (oldest to newest)
+    const sortedMessages = Array.from(messages.values())
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .filter(msg => !msg.content.startsWith('!')); // Exclude messages starting with !
+
+    if (sortedMessages.length === 0) {
+      return '';
+    }
+
+    // Format the conversation history
+    const historyLines = sortedMessages.map(msg => {
+      const author = msg.author.username;
+      const content = msg.content || '[no text content]';
+      return `- ${author}: ${content}`;
+    });
+
+    return `[Recent conversation context:]\n${historyLines.join('\n')}\n[End context]\n\n`;
+  } catch (error) {
+    console.error('Error fetching conversation history:', error);
+    return '';
+  }
+}
+
 // TODO refactor out the core send message / stream parse logic to clean up this function
 // Sending a timer message
 async function sendTimerMessage(channel?: { send: (content: string) => Promise<any> }) {
@@ -139,9 +182,10 @@ async function sendTimerMessage(channel?: { send: (content: string) => Promise<a
 // Send message and receive response
 async function sendMessage(
   discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>,
-  messageType: MessageType
+  messageType: MessageType,
+  shouldRespond: boolean = true
 ) {
-  const { author: { username: senderName, id: senderId }, content: message } =
+  const { author: { username: senderName, id: senderId }, content: message, channel, guild } =
     discordMessageObject;
 
   if (!AGENT_ID) {
@@ -151,33 +195,59 @@ async function sendMessage(
       : "";
   }
 
+  // Fetch conversation history
+  const conversationHistory = await fetchConversationHistory(discordMessageObject);
+
+  // Get channel context
+  let channelContext = '';
+  if (guild === null) {
+    // DM - no channel name needed
+    channelContext = '';
+  } else if ('name' in channel && channel.name) {
+    // Guild channel with a name
+    channelContext = ` in #${channel.name}`;
+  } else {
+    // Fallback if channel doesn't have a name
+    channelContext = ` in channel (id=${channel.id})`;
+  }
+
   // We include a sender receipt so that agent knows which user sent the message
   // We also include the Discord ID so that the agent can tag the user with @
   const senderNameReceipt = `${senderName} (id=${senderId})`;
+
+  // Build the message content with history prepended
+  let messageContent: string;
+  if (USE_SENDER_PREFIX) {
+    const currentMessagePrefix = messageType === MessageType.MENTION
+      ? `[${senderNameReceipt} sent a message${channelContext} mentioning you] ${message}`
+      : messageType === MessageType.REPLY
+        ? `[${senderNameReceipt} replied to you${channelContext}] ${message}`
+        : messageType === MessageType.DM
+          ? `[${senderNameReceipt} sent you a direct message] ${message}`
+          : `[${senderNameReceipt} sent a message${channelContext}] ${message}`;
+    messageContent = conversationHistory + currentMessagePrefix;
+  } else {
+    messageContent = conversationHistory + message;
+  }
 
   // If LETTA_USE_SENDER_PREFIX, then we put the receipt in the front of the message
   // If it's false, then we put the receipt in the name field (the backend must handle it)
   const lettaMessage = {
     role: "user" as const,
     name: USE_SENDER_PREFIX ? undefined : senderNameReceipt,
-    content: USE_SENDER_PREFIX
-      ? messageType === MessageType.MENTION
-        ? `[${senderNameReceipt} sent a message mentioning you] ${message}`
-        : messageType === MessageType.REPLY
-          ? `[${senderNameReceipt} replied to you] ${message}`
-          : messageType === MessageType.DM
-            ? `[${senderNameReceipt} sent you a direct message] ${message}`
-            : `[${senderNameReceipt} sent a message to the channel] ${message}`
-      : message
+    content: messageContent
   };
 
-  // Typing indicator: pulse now and every 8 s until cleaned up
-  void discordMessageObject.channel.sendTyping();
-  const typingInterval = setInterval(() => {
-    void discordMessageObject.channel
-      .sendTyping()
-      .catch(err => console.error('Error refreshing typing indicator:', err));
-  }, 8000);
+  // Typing indicator: pulse now and every 8 s until cleaned up (only if we should respond)
+  let typingInterval: NodeJS.Timeout | undefined;
+  if (shouldRespond) {
+    void discordMessageObject.channel.sendTyping();
+    typingInterval = setInterval(() => {
+      void discordMessageObject.channel
+        .sendTyping()
+        .catch(err => console.error('Error refreshing typing indicator:', err));
+    }, 8000);
+  }
 
   try {
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID}): ${JSON.stringify(lettaMessage)}`);
@@ -185,7 +255,8 @@ async function sendMessage(
       messages: [lettaMessage]
     });
 
-    const agentMessageResponse = response ? await processStream(response, discordMessageObject) : "";
+    // Only pass discordMessageObject to processStream if we should respond (to show intermediate messages)
+    const agentMessageResponse = response ? await processStream(response, shouldRespond ? discordMessageObject : undefined) : "";
     return agentMessageResponse || "";
   } catch (error) {
     if (error instanceof Error && /timeout/i.test(error.message)) {
@@ -199,7 +270,9 @@ async function sendMessage(
       ? 'Beep boop. An error occurred while communicating with the Letta server. Please message me again later 👾'
       : "";
   } finally {
-    clearInterval(typingInterval);
+    if (typingInterval) {
+      clearInterval(typingInterval);
+    }
   }
 }
 
