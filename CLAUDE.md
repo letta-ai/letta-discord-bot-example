@@ -26,7 +26,11 @@ npm run build
 
 Copy `.env.template` to `.env` and configure:
 - **Letta**: `LETTA_API_KEY`, `LETTA_BASE_URL`, `LETTA_AGENT_ID`
-- **Letta Context**: `LETTA_USE_SENDER_PREFIX`, `LETTA_CONTEXT_MESSAGE_COUNT` (number of recent messages to include as context, default: 5, set to 0 to disable)
+- **Letta Context**:
+  - `LETTA_USE_SENDER_PREFIX`: Include sender info in message prefix
+  - `LETTA_CONTEXT_MESSAGE_COUNT`: Number of recent messages to include as context (default: 5, set to 0 to disable)
+  - `LETTA_THREAD_CONTEXT_ENABLED`: Enable full thread context when in threads (default: true)
+  - `LETTA_THREAD_MESSAGE_LIMIT`: Max messages to fetch from threads (default: 50, 0 for unlimited)
 - **Discord**: `APP_ID`, `DISCORD_TOKEN`, `PUBLIC_KEY`
 - **Channel filtering**:
   - `DISCORD_CHANNEL_ID`: Only listen to messages in this channel (ignores all other channels)
@@ -66,7 +70,9 @@ Copy `.env.template` to `.env` and configure:
 
 ### Conversation History
 
-The bot includes recent message history as context for the agent:
+The bot includes message history as context for the agent:
+
+**Regular channels:**
 - Fetches the last N messages (default 5, configured via `LETTA_CONTEXT_MESSAGE_COUNT`)
 - Includes both user and bot messages for full conversational context
 - Filters out messages starting with `!` (command messages)
@@ -80,8 +86,26 @@ The bot includes recent message history as context for the agent:
 
   [Current message from user]
   ```
-- Works in both channels and DMs
 - Set `LETTA_CONTEXT_MESSAGE_COUNT=0` to disable
+
+**Threads:**
+- Automatically detects when message is in a thread
+- Fetches the thread starter message and all thread messages (up to `LETTA_THREAD_MESSAGE_LIMIT`, default 50)
+- Formatted as thread context:
+  ```
+  [Thread: "Thread name"]
+  [Thread started by username: "original message"]
+
+  [Thread conversation history:]
+  - user1: message
+  - user2: reply
+  - user3: another reply
+  [End thread context]
+
+  [Current message from user]
+  ```
+- Thread context takes precedence over regular conversation history
+- Set `LETTA_THREAD_CONTEXT_ENABLED=false` to disable thread context
 
 ### Message Types
 

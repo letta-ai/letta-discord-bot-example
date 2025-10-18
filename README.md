@@ -152,6 +152,8 @@ The following environment variables can be set in the `.env` file:
 * `LETTA_BASE_URL`: The base URL of your Letta server. Defaults to `https://api.letta.com` (Letta Cloud). If you're using a self-hosted Letta server, this is usually `http://localhost:8283`.
 * `LETTA_AGENT_ID`: The ID of the Letta agent to use for the bot.
 * `LETTA_CONTEXT_MESSAGE_COUNT`: Number of recent messages to include as conversation context (default: 5, set to 0 to disable).
+* `LETTA_THREAD_CONTEXT_ENABLED`: Enable fetching full thread context when message is in a thread (default: true).
+* `LETTA_THREAD_MESSAGE_LIMIT`: Maximum number of messages to fetch from a thread (default: 50, set to 0 for unlimited).
 
 * `APP_ID`: The ID of your Discord application.
 * `DISCORD_TOKEN`: The bot token for your Discord bot.

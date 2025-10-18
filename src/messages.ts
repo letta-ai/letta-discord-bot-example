@@ -12,6 +12,8 @@ const AGENT_ID = process.env.LETTA_AGENT_ID;
 const USE_SENDER_PREFIX = process.env.LETTA_USE_SENDER_PREFIX === 'true';
 const SURFACE_ERRORS = process.env.SURFACE_ERRORS === 'true';
 const CONTEXT_MESSAGE_COUNT = parseInt(process.env.LETTA_CONTEXT_MESSAGE_COUNT || '5', 10);
+const THREAD_CONTEXT_ENABLED = process.env.LETTA_THREAD_CONTEXT_ENABLED !== 'false'; // Default true
+const THREAD_MESSAGE_LIMIT = parseInt(process.env.LETTA_THREAD_MESSAGE_LIMIT || '50', 10);
 
 enum MessageType {
   DM = "DM",
@@ -96,11 +98,91 @@ const processStream = async (
   return agentMessageResponse;
 }
 
+// Helper function to fetch and format thread context
+async function fetchThreadContext(
+  discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<string> {
+  if (!THREAD_CONTEXT_ENABLED) {
+    console.log(`🧵 Thread context disabled`);
+    return '';
+  }
+
+  const channel = discordMessageObject.channel;
+
+  // Check if this is a thread
+  if (!('isThread' in channel) || !channel.isThread()) {
+    console.log(`🧵 Not in a thread, skipping thread context`);
+    return '';
+  }
+
+  console.log(`🧵 Fetching thread context (limit: ${THREAD_MESSAGE_LIMIT || 'unlimited'})`);
+
+  try {
+    // Fetch the starter message (the message that created the thread)
+    const starterMessage = await channel.fetchStarterMessage();
+
+    // Fetch all messages in the thread
+    const fetchOptions: any = {};
+    if (THREAD_MESSAGE_LIMIT > 0) {
+      fetchOptions.limit = THREAD_MESSAGE_LIMIT;
+    } else {
+      fetchOptions.limit = 100; // Discord's max, we'll paginate if needed
+    }
+
+    const messages = await channel.messages.fetch(fetchOptions);
+
+    console.log(`🧵 Fetched ${messages.size} thread messages`);
+
+    // Sort messages chronologically (oldest to newest)
+    const sortedMessages = Array.from(messages.values())
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .filter(msg => msg.id !== discordMessageObject.id) // Exclude current message
+      .filter(msg => !msg.content.startsWith('!')); // Exclude commands
+
+    console.log(`🧵 ${sortedMessages.length} messages after filtering`);
+
+    // Format thread context
+    const threadName = channel.name || 'Unnamed thread';
+    let threadContext = `[Thread: "${threadName}"]\n`;
+
+    if (starterMessage) {
+      const starterAuthor = starterMessage.author.username;
+      const starterContent = starterMessage.content || '[no text content]';
+      threadContext += `[Thread started by ${starterAuthor}: "${starterContent}"]\n\n`;
+    }
+
+    if (sortedMessages.length > 0) {
+      threadContext += `[Thread conversation history:]\n`;
+      const historyLines = sortedMessages.map(msg => {
+        const author = msg.author.username;
+        const content = msg.content || '[no text content]';
+        return `- ${author}: ${content}`;
+      });
+      threadContext += historyLines.join('\n') + '\n';
+    }
+
+    threadContext += `[End thread context]\n\n`;
+
+    console.log(`🧵 Thread context formatted:\n${threadContext}`);
+    return threadContext;
+  } catch (error) {
+    console.error('🧵 Error fetching thread context:', error);
+    return '';
+  }
+}
+
 // Helper function to fetch and format conversation history
 async function fetchConversationHistory(
   discordMessageObject: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<string> {
   console.log(`📚 CONTEXT_MESSAGE_COUNT: ${CONTEXT_MESSAGE_COUNT}`);
+
+  // If we're in a thread, use thread context instead
+  const channel = discordMessageObject.channel;
+  if ('isThread' in channel && channel.isThread() && THREAD_CONTEXT_ENABLED) {
+    console.log(`📚 In a thread, using thread context instead of conversation history`);
+    return fetchThreadContext(discordMessageObject);
+  }
 
   if (CONTEXT_MESSAGE_COUNT <= 0) {
     console.log(`📚 Conversation history disabled (CONTEXT_MESSAGE_COUNT=${CONTEXT_MESSAGE_COUNT})`);
