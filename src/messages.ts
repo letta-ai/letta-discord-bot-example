@@ -1,7 +1,7 @@
 import { LettaClient } from "@letta-ai/letta-client";
 import { LettaStreamingResponse } from "@letta-ai/letta-client/api/resources/agents/resources/messages/types/LettaStreamingResponse";
 import { Stream } from "@letta-ai/letta-client/core";
-import { Message, OmitPartialGroupDMChannel } from "discord.js";
+import { Message, OmitPartialGroupDMChannel, Collection } from "discord.js";
 
 // Discord message length limit
 const DISCORD_MESSAGE_LIMIT = 2000;
@@ -169,15 +169,15 @@ async function fetchThreadContext(
       fetchOptions.limit = 100; // Discord's max, we'll paginate if needed
     }
 
-    const messages = await channel.messages.fetch(fetchOptions);
+    const messages = await channel.messages.fetch(fetchOptions) as unknown as Collection<string, Message>;
 
     console.log(`🧵 Fetched ${messages.size} thread messages`);
 
     // Sort messages chronologically (oldest to newest)
     const sortedMessages = Array.from(messages.values())
-      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .filter(msg => msg.id !== discordMessageObject.id) // Exclude current message
-      .filter(msg => !msg.content.startsWith('!')); // Exclude commands
+      .sort((a: Message, b: Message) => a.createdTimestamp - b.createdTimestamp)
+      .filter((msg: Message) => msg.id !== discordMessageObject.id) // Exclude current message
+      .filter((msg: Message) => !msg.content.startsWith('!')); // Exclude commands
 
     console.log(`🧵 ${sortedMessages.length} messages after filtering`);
 
@@ -193,7 +193,7 @@ async function fetchThreadContext(
 
     if (sortedMessages.length > 0) {
       threadContext += `[Thread conversation history:]\n`;
-      const historyLines = sortedMessages.map(msg => {
+      const historyLines = sortedMessages.map((msg: Message) => {
         const author = msg.author.username;
         const content = msg.content || '[no text content]';
         return `- ${author}: ${content}`;
