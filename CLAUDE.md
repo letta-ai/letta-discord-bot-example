@@ -55,6 +55,7 @@ Copy `.env.template` to `.env` and configure:
   - Processes different message types (assistant, reasoning, tool calls, tool returns)
   - Sends intermediate messages to Discord (reasoning and tool calls visible as separate messages)
   - Manages typing indicators during agent processing
+  - Auto-splits long messages to fit Discord's 2000 character limit
 
 ### Message Flow
 
@@ -66,7 +67,7 @@ Copy `.env.template` to `.env` and configure:
    - **Reasoning messages**: Sent as separate Discord messages with "Reasoning" header
    - **Tool calls**: Sent as separate messages showing tool name and arguments
    - **Tool returns**: Sent showing return values (truncated to 200 chars)
-   - **Assistant message**: Final response sent as reply
+   - **Assistant message**: Final response sent as reply (auto-split if longer than 2000 characters)
 
 ### Conversation History
 

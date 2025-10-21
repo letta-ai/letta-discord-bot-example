@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { Client, GatewayIntentBits, Message, OmitPartialGroupDMChannel, Partials } from 'discord.js';
-import { sendMessage, sendTimerMessage, MessageType } from './messages';
+import { sendMessage, sendTimerMessage, MessageType, splitMessage } from './messages';
 
 
 const app = express();
@@ -108,8 +108,8 @@ async function drainMessageBatch(channelId: string) {
     const msg = await sendMessage(lastMessage, buffer[buffer.length - 1].messageType, canRespond, batchMessage);
 
     if (msg !== "" && canRespond) {
-      await lastMessage.reply(msg);
-      console.log(`📦 Batch response sent: ${msg}`);
+      await sendSplitReply(lastMessage, msg);
+      console.log(`📦 Batch response sent (${msg.length} chars)`);
     } else if (msg !== "" && !canRespond) {
       console.log(`📦 Agent generated response but not responding (not in response channel): ${msg}`);
     }
@@ -167,6 +167,28 @@ function shouldRespondInChannel(channelId: string): boolean {
   return channelId === RESPONSE_CHANNEL_ID;
 }
 
+// Helper function to send a message, splitting if necessary
+async function sendSplitReply(message: OmitPartialGroupDMChannel<Message<boolean>>, content: string) {
+  const chunks = splitMessage(content);
+  for (let i = 0; i < chunks.length; i++) {
+    if (i === 0) {
+      // First message is a reply
+      await message.reply(chunks[i]);
+    } else {
+      // Subsequent messages are regular sends
+      await message.channel.send(chunks[i]);
+    }
+  }
+}
+
+// Helper function to send a message to a channel, splitting if necessary
+async function sendSplitMessage(channel: { send: (content: string) => Promise<any> }, content: string) {
+  const chunks = splitMessage(content);
+  for (const chunk of chunks) {
+    await channel.send(chunk);
+  }
+}
+
 // Helper function to send a message and receive a response
 async function processAndSendMessage(message: OmitPartialGroupDMChannel<Message<boolean>>, messageType: MessageType) {
   // If batching is enabled, add to batch instead of processing immediately
@@ -180,8 +202,8 @@ async function processAndSendMessage(message: OmitPartialGroupDMChannel<Message<
     const canRespond = shouldRespondInChannel(message.channel.id);
     const msg = await sendMessage(message, messageType, canRespond);
     if (msg !== "" && canRespond) {
-      await message.reply(msg);
-      console.log(`Message sent: ${msg}`);
+      await sendSplitReply(message, msg);
+      console.log(`Message sent (${msg.length} chars)`);
     } else if (msg !== "" && !canRespond) {
       console.log(`Agent generated response but not responding (not in response channel): ${msg}`);
     }
@@ -236,8 +258,8 @@ async function startRandomEventTimer() {
           // Send the final assistant message if there is one
           if (msg !== "" && channel) {
               try {
-                  await channel.send(msg);
-                  console.log("⏰ Timer message sent to channel");
+                  await sendSplitMessage(channel, msg);
+                  console.log(`⏰ Timer message sent to channel (${msg.length} chars)`);
               } catch (error) {
                   console.error("⏰ Error sending timer message:", error);
               }
@@ -333,7 +355,7 @@ client.on('messageCreate', async (message) => {
     // Otherwise, process immediately (original behavior)
     const msg = await sendMessage(message, messageType, canRespond);
     if (msg !== "" && canRespond) {
-      await message.reply(msg);
+      await sendSplitReply(message, msg);
     } else if (msg !== "" && !canRespond) {
       console.log(`Agent generated response but not responding (not in response channel): ${msg}`);
     }

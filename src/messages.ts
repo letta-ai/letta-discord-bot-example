@@ -3,6 +3,9 @@ import { LettaStreamingResponse } from "@letta-ai/letta-client/api/resources/age
 import { Stream } from "@letta-ai/letta-client/core";
 import { Message, OmitPartialGroupDMChannel } from "discord.js";
 
+// Discord message length limit
+const DISCORD_MESSAGE_LIMIT = 2000;
+
 // If the token is not set, just use a dummy value
 const client = new LettaClient({
   token: process.env.LETTA_API_KEY || 'your_letta_api_key',
@@ -20,6 +23,43 @@ enum MessageType {
   MENTION = "MENTION",
   REPLY = "REPLY",
   GENERIC = "GENERIC"
+}
+
+// Helper function to split long messages into chunks that fit Discord's limit
+function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): string[] {
+  if (content.length <= limit) {
+    return [content];
+  }
+
+  const chunks: string[] = [];
+  let remaining = content;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= limit) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Find a good breaking point (prefer newline, then space, then just cut)
+    let splitIndex = limit;
+
+    // Try to find last newline before limit
+    const lastNewline = remaining.lastIndexOf('\n', limit);
+    if (lastNewline > limit * 0.5) { // Only if it's not too early
+      splitIndex = lastNewline + 1;
+    } else {
+      // Try to find last space before limit
+      const lastSpace = remaining.lastIndexOf(' ', limit);
+      if (lastSpace > limit * 0.5) { // Only if it's not too early
+        splitIndex = lastSpace + 1;
+      }
+    }
+
+    chunks.push(remaining.substring(0, splitIndex));
+    remaining = remaining.substring(splitIndex);
+  }
+
+  return chunks;
 }
 
 // Helper function to process stream
@@ -393,4 +433,4 @@ async function sendMessage(
   }
 }
 
-export { sendMessage, sendTimerMessage, MessageType };
+export { sendMessage, sendTimerMessage, MessageType, splitMessage };
