@@ -360,9 +360,11 @@ async function sendMessage(
   if (batchedMessage) {
     messageContent = batchedMessage;
 
-    // Add observation notice if agent cannot respond in this channel
+    // Add notice about whether agent can respond in this channel
     if (!shouldRespond && channelContext) {
       messageContent += `\n\n[IMPORTANT: You are only observing these messages. You cannot respond in this channel. Your response will not be sent to Discord.]`;
+    } else if (shouldRespond) {
+      messageContent += `\n\n[You CAN respond to these messages. Your response will be sent to Discord.]`;
     }
   } else if (USE_SENDER_PREFIX) {
     const currentMessagePrefix = messageType === MessageType.MENTION
@@ -373,12 +375,14 @@ async function sendMessage(
           ? `[${senderNameReceipt} sent you a direct message] ${message}`
           : `[${senderNameReceipt} sent a message${channelContext}] ${message}`;
 
-    // Add observation notice if agent cannot respond in this channel
-    const observationNotice = !shouldRespond && channelContext
+    // Add notice about whether agent can respond in this channel
+    const responseNotice = !shouldRespond && channelContext
       ? `\n\n[IMPORTANT: You are only observing this message. You cannot respond in this channel. Your response will not be sent to Discord.]`
-      : '';
+      : shouldRespond
+        ? `\n\n[You CAN respond to this message. Your response will be sent to Discord.]`
+        : '';
 
-    messageContent = conversationHistory + currentMessagePrefix + observationNotice;
+    messageContent = conversationHistory + currentMessagePrefix + responseNotice;
   } else {
     messageContent = conversationHistory + message;
   }
