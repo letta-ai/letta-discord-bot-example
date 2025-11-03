@@ -37,6 +37,10 @@ const client = new Client({
   partials: [Partials.Channel] // Required for handling DMs
 });
 
+client.on('error', (error) => {
+  console.error('🛑 Discord client error:', error);
+});
+
 // Discord Bot Ready Event
 client.once('ready', () => {
   console.log(`🤖 Logged in as ${client.user?.tag}!`);
@@ -333,15 +337,20 @@ client.on('messageCreate', async (message) => {
 
     // If it's a reply, fetch the original message and check if it's to the bot
     if (message.reference && message.reference.messageId) {
-        const originalMessage = await message.channel.messages.fetch(message.reference.messageId);
+        try {
+          const originalMessage = await message.channel.messages.fetch(message.reference.messageId);
 
-        // Check if the original message was from the bot
-        if (originalMessage.author.id === client.user?.id) {
-          // This is a reply to the bot
-          messageType = MessageType.REPLY;
-          msgContent = `[Replying to previous message: "${truncateMessage(originalMessage.content, MESSAGE_REPLY_TRUNCATE_LENGTH)}"] ${msgContent}`;
-        } else {
-          // This is a reply to someone else, but the bot is mentioned or it's a generic message
+          // Check if the original message was from the bot
+          if (originalMessage.author.id === client.user?.id) {
+            // This is a reply to the bot
+            messageType = MessageType.REPLY;
+            msgContent = `[Replying to previous message: "${truncateMessage(originalMessage.content, MESSAGE_REPLY_TRUNCATE_LENGTH)}"] ${msgContent}`;
+          } else {
+            // This is a reply to someone else, but the bot is mentioned or it's a generic message
+            messageType = message.mentions.has(client.user || '') ? MessageType.MENTION : MessageType.GENERIC;
+          }
+        } catch (error) {
+          console.log(`⚠️ Could not fetch referenced message: ${error instanceof Error ? error.message : error}`);
           messageType = message.mentions.has(client.user || '') ? MessageType.MENTION : MessageType.GENERIC;
         }
     }
