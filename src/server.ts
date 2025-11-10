@@ -20,7 +20,6 @@ const MESSAGE_BATCH_ENABLED = process.env.MESSAGE_BATCH_ENABLED === 'true';
 const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
 const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
 const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
-const THREAD_NAME = process.env.THREAD_NAME || 'Chat';
 
 function truncateMessage(message: string, maxLength: number): string {
     if (message.length > maxLength) {
@@ -185,7 +184,8 @@ async function sendSplitReply(message: OmitPartialGroupDMChannel<Message<boolean
     } else if (message.hasThread && message.thread) {
       thread = message.thread;
     } else {
-      thread = await message.startThread({ name: THREAD_NAME });
+      const threadName = message.content.substring(0, 50) || 'Chat';
+      thread = await message.startThread({ name: threadName });
     }
     
     if (thread) {
