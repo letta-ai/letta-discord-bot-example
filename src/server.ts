@@ -77,7 +77,7 @@ async function drainMessageBatch(channelId: string) {
 
   // Get the last message to use as the reply target
   const lastMessage = buffer[buffer.length - 1].message;
-  const canRespond = shouldRespondInChannel(channelId);
+  const canRespond = shouldRespondInChannel(lastMessage);
 
   // Format all messages in batch
   const batchedContent = buffer.map((bm, idx) => {
@@ -163,11 +163,17 @@ function addMessageToBatch(message: OmitPartialGroupDMChannel<Message<boolean>>,
 }
 
 // Helper function to check if bot should respond in this channel
-function shouldRespondInChannel(channelId: string): boolean {
+function shouldRespondInChannel(message: OmitPartialGroupDMChannel<Message<boolean>>): boolean {
   // If RESPONSE_CHANNEL_ID is not set, respond everywhere
   if (!RESPONSE_CHANNEL_ID) {
     return true;
   }
+  
+  // For threads, check the parent channel ID
+  const channelId = message.channel.isThread() 
+    ? message.channel.parentId 
+    : message.channel.id;
+    
   // If RESPONSE_CHANNEL_ID is set, only respond in that channel
   return channelId === RESPONSE_CHANNEL_ID;
 }
@@ -222,7 +228,7 @@ async function processAndSendMessage(message: OmitPartialGroupDMChannel<Message<
 
   // Otherwise, process immediately (original behavior)
   try {
-    const canRespond = shouldRespondInChannel(message.channel.id);
+    const canRespond = shouldRespondInChannel(message);
     const msg = await sendMessage(message, messageType, canRespond);
     if (msg !== "" && canRespond) {
       await sendSplitReply(message, msg);
@@ -342,7 +348,7 @@ client.on('messageCreate', async (message) => {
     console.log(`📩 Received message from ${message.author.username}: ${message.content}`);
 
     // Check if we can respond in this channel before showing typing indicator
-    const canRespond = shouldRespondInChannel(message.channel.id);
+    const canRespond = shouldRespondInChannel(message);
     console.log(`💬 Can respond in this channel: ${canRespond} (channel=${message.channel.id}, responseChannel=${RESPONSE_CHANNEL_ID || 'any'})`);
     if (canRespond) {
       console.log(`⌨️  Sending typing indicator...`);
