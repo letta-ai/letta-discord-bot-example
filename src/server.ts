@@ -19,6 +19,8 @@ const FIRING_PROBABILITY = parseFloat(process.env.FIRING_PROBABILITY || '0.1');
 const MESSAGE_BATCH_ENABLED = process.env.MESSAGE_BATCH_ENABLED === 'true';
 const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
 const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
+const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
+const THREAD_NAME = process.env.THREAD_NAME || 'Chat';
 
 function truncateMessage(message: string, maxLength: number): string {
     if (message.length > maxLength) {
@@ -174,13 +176,30 @@ function shouldRespondInChannel(channelId: string): boolean {
 // Helper function to send a message, splitting if necessary
 async function sendSplitReply(message: OmitPartialGroupDMChannel<Message<boolean>>, content: string) {
   const chunks = splitMessage(content);
-  for (let i = 0; i < chunks.length; i++) {
-    if (i === 0) {
-      // First message is a reply
-      await message.reply(chunks[i]);
+  
+  if (REPLY_IN_THREADS && message.guild !== null) {
+    let thread;
+    
+    if (message.channel.isThread()) {
+      thread = message.channel;
+    } else if (message.hasThread && message.thread) {
+      thread = message.thread;
     } else {
-      // Subsequent messages are regular sends
-      await message.channel.send(chunks[i]);
+      thread = await message.startThread({ name: THREAD_NAME });
+    }
+    
+    if (thread) {
+      for (const chunk of chunks) {
+        await thread.send(chunk);
+      }
+    }
+  } else {
+    for (let i = 0; i < chunks.length; i++) {
+      if (i === 0) {
+        await message.reply(chunks[i]);
+      } else {
+        await message.channel.send(chunks[i]);
+      }
     }
   }
 }
@@ -327,7 +346,17 @@ client.on('messageCreate', async (message) => {
     console.log(`💬 Can respond in this channel: ${canRespond} (channel=${message.channel.id}, responseChannel=${RESPONSE_CHANNEL_ID || 'any'})`);
     if (canRespond) {
       console.log(`⌨️  Sending typing indicator...`);
-      await message.channel.sendTyping();
+      if (REPLY_IN_THREADS && message.guild !== null) {
+        if (message.channel.isThread()) {
+          await message.channel.sendTyping();
+        } else if (message.hasThread) {
+          await message.thread!.sendTyping();
+        } else {
+          await message.channel.sendTyping();
+        }
+      } else {
+        await message.channel.sendTyping();
+      }
     } else {
       console.log(`⌨️  Skipping typing indicator (observation-only channel)`);
     }
