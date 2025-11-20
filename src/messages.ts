@@ -33,6 +33,8 @@ function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): s
 
   const chunks: string[] = [];
   let remaining = content;
+  let inCodeBlock = false;
+  let codeBlockLang = '';
 
   while (remaining.length > 0) {
     if (remaining.length <= limit) {
@@ -40,23 +42,103 @@ function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): s
       break;
     }
 
-    // Find a good breaking point (prefer newline, then space, then just cut)
     let splitIndex = limit;
-
-    // Try to find last newline before limit
-    const lastNewline = remaining.lastIndexOf('\n', limit);
-    if (lastNewline > limit * 0.5) { // Only if it's not too early
-      splitIndex = lastNewline + 1;
+    let chunk = remaining.substring(0, splitIndex);
+    
+    // Find all code block markers up to split point
+    const codeBlockRegex = /```(\w*)/g;
+    let match;
+    let blockCount = 0;
+    let lastOpenBlock = -1;
+    let lastOpenLang = '';
+    
+    while ((match = codeBlockRegex.exec(chunk)) !== null) {
+      blockCount++;
+      if (blockCount % 2 === 1) {
+        lastOpenBlock = match.index;
+        lastOpenLang = match[1] || '';
+      }
+    }
+    
+    // Check if we're in a code block at split point
+    const wouldBeInBlock = (inCodeBlock && blockCount % 2 === 0) || (!inCodeBlock && blockCount % 2 === 1);
+    
+    if (wouldBeInBlock) {
+      // We're splitting inside a code block
+      // Try to find a newline within the block before the limit
+      const searchStart = lastOpenBlock > 0 ? lastOpenBlock : 0;
+      const lastNewlineInBlock = chunk.lastIndexOf('\n', splitIndex - 1);
+      
+      if (lastNewlineInBlock > searchStart && lastNewlineInBlock > splitIndex * 0.5) {
+        // Split at newline inside block
+        splitIndex = lastNewlineInBlock + 1;
+        chunk = remaining.substring(0, splitIndex);
+        
+        // Close the code block
+        chunk += '```';
+        chunks.push(chunk);
+        
+        // Next chunk will reopen with same language
+        const lang = inCodeBlock ? codeBlockLang : lastOpenLang;
+        remaining = '```' + lang + '\n' + remaining.substring(splitIndex);
+        inCodeBlock = true;
+        codeBlockLang = lang;
+        continue;
+      } else if (lastOpenBlock > limit * 0.3) {
+        // Code block starts late in chunk, break before it
+        splitIndex = lastOpenBlock;
+        if (splitIndex > 0 && remaining[splitIndex - 1] === '\n') {
+          // Include the newline before the code block
+        } else {
+          // Find previous newline
+          const prevNewline = remaining.lastIndexOf('\n', splitIndex - 1);
+          if (prevNewline > splitIndex * 0.5) {
+            splitIndex = prevNewline + 1;
+          }
+        }
+      } else {
+        // Code block is too large, must split inside it
+        // Find any newline before limit
+        const lastNewline = chunk.lastIndexOf('\n', splitIndex - 1);
+        if (lastNewline > splitIndex * 0.5) {
+          splitIndex = lastNewline + 1;
+        }
+        
+        chunk = remaining.substring(0, splitIndex) + '```';
+        chunks.push(chunk);
+        
+        const lang = inCodeBlock ? codeBlockLang : lastOpenLang;
+        remaining = '```' + lang + '\n' + remaining.substring(splitIndex);
+        inCodeBlock = true;
+        codeBlockLang = lang;
+        continue;
+      }
     } else {
-      // Try to find last space before limit
-      const lastSpace = remaining.lastIndexOf(' ', limit);
-      if (lastSpace > limit * 0.5) { // Only if it's not too early
-        splitIndex = lastSpace + 1;
+      // Not in a code block, use normal splitting logic
+      const lastNewline = remaining.lastIndexOf('\n', splitIndex);
+      if (lastNewline > splitIndex * 0.5) {
+        splitIndex = lastNewline + 1;
+      } else {
+        const lastSpace = remaining.lastIndexOf(' ', splitIndex);
+        if (lastSpace > splitIndex * 0.5) {
+          splitIndex = lastSpace + 1;
+        }
       }
     }
 
     chunks.push(remaining.substring(0, splitIndex));
     remaining = remaining.substring(splitIndex);
+    
+    // Update code block state for next iteration
+    const addedChunk = chunks[chunks.length - 1];
+    const blocksInChunk = (addedChunk.match(/```/g) || []).length;
+    if (blocksInChunk % 2 === 1) {
+      inCodeBlock = !inCodeBlock;
+      if (inCodeBlock) {
+        const match = /```(\w*)/.exec(addedChunk.substring(addedChunk.lastIndexOf('```')));
+        codeBlockLang = match ? match[1] : '';
+      }
+    }
   }
 
   return chunks;
