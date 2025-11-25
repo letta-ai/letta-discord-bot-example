@@ -25,16 +25,14 @@ enum MessageType {
   GENERIC = "GENERIC"
 }
 
-// Helper function to split long messages into chunks that fit Discord's limit
-function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): string[] {
-  if (content.length <= limit) {
-    return [content];
+// Helper function to split text that doesn't contain code blocks
+function splitText(text: string, limit: number): string[] {
+  if (text.length <= limit) {
+    return [text];
   }
 
   const chunks: string[] = [];
-  let remaining = content;
-  let inCodeBlock = false;
-  let codeBlockLang = '';
+  let remaining = text;
 
   while (remaining.length > 0) {
     if (remaining.length <= limit) {
@@ -43,105 +41,94 @@ function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): s
     }
 
     let splitIndex = limit;
-    let chunk = remaining.substring(0, splitIndex);
-    
-    // Find all code block markers up to split point
-    const codeBlockRegex = /```(\w*)/g;
-    let match;
-    let blockCount = 0;
-    let lastOpenBlock = -1;
-    let lastOpenLang = '';
-    
-    while ((match = codeBlockRegex.exec(chunk)) !== null) {
-      blockCount++;
-      if (blockCount % 2 === 1) {
-        lastOpenBlock = match.index;
-        lastOpenLang = match[1] || '';
-      }
-    }
-    
-    // Check if we're in a code block at split point
-    const wouldBeInBlock = (inCodeBlock && blockCount % 2 === 0) || (!inCodeBlock && blockCount % 2 === 1);
-    
-    if (wouldBeInBlock) {
-      // We're splitting inside a code block
-      // Try to find a newline within the block before the limit
-      const searchStart = lastOpenBlock > 0 ? lastOpenBlock : 0;
-      const lastNewlineInBlock = chunk.lastIndexOf('\n', splitIndex - 1);
-      
-      if (lastNewlineInBlock > searchStart && lastNewlineInBlock > splitIndex * 0.5) {
-        // Split at newline inside block
-        splitIndex = lastNewlineInBlock + 1;
-        chunk = remaining.substring(0, splitIndex);
-        
-        // Close the code block
-        chunk += '```';
-        chunks.push(chunk);
-        
-        // Next chunk will reopen with same language
-        const lang = inCodeBlock ? codeBlockLang : lastOpenLang;
-        remaining = '```' + lang + '\n' + remaining.substring(splitIndex);
-        inCodeBlock = true;
-        codeBlockLang = lang;
-        continue;
-      } else if (lastOpenBlock > limit * 0.3) {
-        // Code block starts late in chunk, break before it
-        splitIndex = lastOpenBlock;
-        if (splitIndex > 0 && remaining[splitIndex - 1] === '\n') {
-          // Include the newline before the code block
-        } else {
-          // Find previous newline
-          const prevNewline = remaining.lastIndexOf('\n', splitIndex - 1);
-          if (prevNewline > splitIndex * 0.5) {
-            splitIndex = prevNewline + 1;
-          }
-        }
-      } else {
-        // Code block is too large, must split inside it
-        // Find any newline before limit
-        const lastNewline = chunk.lastIndexOf('\n', splitIndex - 1);
-        if (lastNewline > splitIndex * 0.5) {
-          splitIndex = lastNewline + 1;
-        }
-        
-        chunk = remaining.substring(0, splitIndex) + '```';
-        chunks.push(chunk);
-        
-        const lang = inCodeBlock ? codeBlockLang : lastOpenLang;
-        remaining = '```' + lang + '\n' + remaining.substring(splitIndex);
-        inCodeBlock = true;
-        codeBlockLang = lang;
-        continue;
-      }
+    const lastNewline = remaining.lastIndexOf('\n', splitIndex);
+    if (lastNewline > splitIndex * 0.5) {
+      splitIndex = lastNewline + 1;
     } else {
-      // Not in a code block, use normal splitting logic
-      const lastNewline = remaining.lastIndexOf('\n', splitIndex);
-      if (lastNewline > splitIndex * 0.5) {
-        splitIndex = lastNewline + 1;
-      } else {
-        const lastSpace = remaining.lastIndexOf(' ', splitIndex);
-        if (lastSpace > splitIndex * 0.5) {
-          splitIndex = lastSpace + 1;
-        }
+      const lastSpace = remaining.lastIndexOf(' ', splitIndex);
+      if (lastSpace > splitIndex * 0.5) {
+        splitIndex = lastSpace + 1;
       }
     }
 
     chunks.push(remaining.substring(0, splitIndex));
     remaining = remaining.substring(splitIndex);
-    
-    // Update code block state for next iteration
-    const addedChunk = chunks[chunks.length - 1];
-    const blocksInChunk = (addedChunk.match(/```/g) || []).length;
-    if (blocksInChunk % 2 === 1) {
-      inCodeBlock = !inCodeBlock;
-      if (inCodeBlock) {
-        const match = /```(\w*)/.exec(addedChunk.substring(addedChunk.lastIndexOf('```')));
-        codeBlockLang = match ? match[1] : '';
-      }
-    }
   }
 
   return chunks;
+}
+
+// Helper function to split a single code block if it's too large
+function splitCodeBlock(block: string, limit: number): string[] {
+  if (block.length <= limit) {
+    return [block];
+  }
+
+  const openMatch = block.match(/^```(\w*)\n?/);
+  const lang = openMatch ? openMatch[1] : '';
+  const openTag = openMatch ? openMatch[0] : '```\n';
+  const closeTag = '```';
+  
+  const innerContent = block.substring(openTag.length, block.length - closeTag.length);
+  const overhead = openTag.length + closeTag.length;
+  const maxInnerLength = limit - overhead;
+
+  if (maxInnerLength <= 0) {
+    return [block];
+  }
+
+  const chunks: string[] = [];
+  let remaining = innerContent;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxInnerLength) {
+      chunks.push(openTag + remaining + closeTag);
+      break;
+    }
+
+    let splitIndex = maxInnerLength;
+    const lastNewline = remaining.lastIndexOf('\n', splitIndex);
+    if (lastNewline > splitIndex * 0.5) {
+      splitIndex = lastNewline + 1;
+    }
+
+    chunks.push(openTag + remaining.substring(0, splitIndex) + closeTag);
+    remaining = remaining.substring(splitIndex);
+  }
+
+  return chunks;
+}
+
+// Helper function to split long messages into chunks that fit Discord's limit
+function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): string[] {
+  if (content.length <= limit) {
+    return [content];
+  }
+
+  const result: string[] = [];
+  const codeBlockRegex = /```[\s\S]*?```/g;
+  
+  let lastIndex = 0;
+  let match;
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    const textBefore = content.substring(lastIndex, match.index);
+    if (textBefore.trim()) {
+      result.push(...splitText(textBefore, limit));
+    }
+
+    const codeBlock = match[0];
+    result.push(...splitCodeBlock(codeBlock, limit));
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  const textAfter = content.substring(lastIndex);
+  if (textAfter.trim()) {
+    result.push(...splitText(textAfter, limit));
+  }
+
+  return result.length > 0 ? result : [content];
 }
 
 // Helper function to process stream
