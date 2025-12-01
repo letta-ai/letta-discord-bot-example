@@ -166,29 +166,12 @@ const processStream = async (
             break;
           case 'reasoning_message':
             console.log('🧠 Reasoning:', chunk);
-            if ('content' in chunk && typeof chunk.content === 'string') {
-              await sendAsyncMessage(`**Reasoning**\n> ${chunk.content}`);
-            }
             break;
           case 'tool_call_message':
             console.log('🔧 Tool call:', chunk);
-            if ('name' in chunk && typeof chunk.name === 'string') {
-              let toolMessage = `**Tool Call (${chunk.name})**`;
-              if ('arguments' in chunk && chunk.arguments) {
-                toolMessage += `\n> Arguments: ${JSON.stringify(chunk.arguments)}`;
-              }
-              await sendAsyncMessage(toolMessage);
-            }
             break;
           case 'tool_return_message':
             console.log('🔧 Tool return:', chunk);
-            if ('name' in chunk && typeof chunk.name === 'string') {
-              let returnMessage = `**Tool Return (${chunk.name})**`;
-              if ('return_value' in chunk && chunk.return_value) {
-                returnMessage += `\n> ${JSON.stringify(chunk.return_value).substring(0, 200)}...`;
-              }
-              await sendAsyncMessage(returnMessage);
-            }
             break;
           case 'usage_statistics':
             console.log('📊 Usage stats:', chunk);
