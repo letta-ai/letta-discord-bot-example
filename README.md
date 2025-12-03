@@ -9,10 +9,11 @@
 
 <div align="center">
 |
-  <a href="#-features">Features</a> · 
-  <a href="#-whats-included">What's included</a> · 
-  <a href="#%EF%B8%8F-quickstart">Quickstart</a> · 
-  <a href="#-running-the-app-locally">Running the app locally</a>
+  <a href="#-features">Features</a> ·
+  <a href="#-whats-included">What's included</a> ·
+  <a href="#%EF%B8%8F-quickstart">Quickstart</a> ·
+  <a href="#-running-the-app-locally">Running the app locally</a> ·
+  <a href="#advanced-features">Advanced Features</a>
 |
 </div>
 
@@ -66,6 +67,29 @@
 
   - TypeScript enhances our codebase with **static typing, improved maintainability, and better developer tooling**, reducing potential runtime errors.
 
+## Development Commands
+
+```bash
+# Install dependencies
+npm install
+
+# Run in development mode (with auto-reload)
+npm run dev
+
+# Run in production mode
+npm start
+
+# Build TypeScript to JavaScript
+npm run build
+```
+
+## Message Flow
+
+1. Discord message received and filtered based on type and configuration
+2. Conversation history fetched from channel (last N messages, configurable)
+3. Message formatted with sender context and channel info, sent to Letta agent
+4. Letta streams response chunks back
+5. Response sent to Discord (auto-split if longer than 2000 characters)
 
 ---
 
@@ -146,24 +170,66 @@ cp .env.template .env
 
 Environment variables can be controlled by setting them in your `.env` file or by setting them in your deployment environment.
 
-The following environment variables can be set in the `.env` file:
+#### Letta Configuration
 
-* `LETTA_API_KEY`: The password of your Letta server (if you self-deployed a server). Not applicable if you are not using a password (see [docs](https://docs.letta.com/guides/server/docker#password-protection-advanced)).
-* `LETTA_BASE_URL`: The base URL of your Letta server. Defaults to `https://api.letta.com` (Letta Cloud). If you're using a self-hosted Letta server, this is usually `http://localhost:8283`.
-* `LETTA_AGENT_ID`: The ID of the Letta agent to use for the bot.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LETTA_API_KEY` | API key for Letta Cloud, or password if self-hosting with authentication | - |
+| `LETTA_BASE_URL` | Base URL of your Letta server | `https://api.letta.com` |
+| `LETTA_AGENT_ID` | ID of the Letta agent to use | Required |
+| `LETTA_USE_SENDER_PREFIX` | Include sender context prefix on messages | `true` |
 
-* `APP_ID`: The ID of your Discord application.
-* `DISCORD_TOKEN`: The bot token for your Discord bot.
-* `PUBLIC_KEY`: The public key for your Discord bot.
-* `DISCORD_CHANNEL_ID`: Set this if you want the bot to only respond to messages (listen) in a specific channel.
+#### Message Context Settings
 
-* `PORT`: The port to run the app on. Default is `3001`.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LETTA_CONTEXT_MESSAGE_COUNT` | Number of recent messages to include as context (0 to disable) | `5` |
+| `LETTA_THREAD_CONTEXT_ENABLED` | Fetch full thread context when in a thread | `true` |
+| `LETTA_THREAD_MESSAGE_LIMIT` | Max messages to fetch from threads (0 for unlimited) | `50` |
 
-* `ENABLE_TIMER`: Enable or disable the timer feature (will randomly trigger an agent input/event at a certain interval, defaults to true). Note that the timer feature requires `DISCORD_CHANNEL_ID` to be set (so that the agent knows where to send a message to if the timer is fired).
-* `TIMER_INTERVAL_MINUTES`: Maximum interval range in minutes for the random timer (defaults to every 15 minutes).
-* `FIRING_PROBABILITY`: Probability of the timer firing (0.0 to 1.0), defaults to 0.1 (10%).
+#### Discord Configuration
 
-For more settings (including options to enable/disable DM interactions, reply to non-directed messages, etc.), view the [`.env.template`](/.env.template) file provided.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `APP_ID` | Discord application ID | Required |
+| `DISCORD_TOKEN` | Discord bot token | Required |
+| `PUBLIC_KEY` | Discord application public key | Required |
+| `DISCORD_CHANNEL_ID` | Only listen to messages in this channel | - |
+| `DISCORD_RESPONSE_CHANNEL_ID` | Only respond in this channel (agent sees all) | - |
+
+#### Response Behavior
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `RESPOND_TO_DMS` | Respond to direct messages | `true` |
+| `RESPOND_TO_MENTIONS` | Respond to @mentions | `true` |
+| `RESPOND_TO_BOTS` | Respond to other bots | `false` |
+| `RESPOND_TO_GENERIC` | Respond to all channel messages | `false` |
+| `SURFACE_ERRORS` | Show errors in Discord (vs logs only) | `false` |
+
+#### Timer/Heartbeat Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_TIMER` | Enable periodic heartbeat events | `true` |
+| `TIMER_INTERVAL_MINUTES` | Max interval for random timer | `15` |
+| `FIRING_PROBABILITY` | Probability timer fires (0.0-1.0) | `0.1` |
+
+> Note: Timer requires `DISCORD_CHANNEL_ID` to be set.
+
+#### Message Batching
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MESSAGE_BATCH_ENABLED` | Accumulate messages before sending to agent | `false` |
+| `MESSAGE_BATCH_SIZE` | Max messages per batch | `10` |
+| `MESSAGE_BATCH_TIMEOUT_MS` | Auto-drain timeout | `30000` |
+
+#### App Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Port to run the app on | `3001` |
 
 ### 👾 Create your Letta agent
 
@@ -202,3 +268,89 @@ We have also prepared a one-click deploy option to easily deploy this repo on Ra
 Simply click the deploy link, enter your environment variables (including your Letta server address and Letta agent ID), and your Discord bot will be ready to go (and live 24/7):
 
 <a href="https://railway.com/template/C__ceE?referralCode=kdR8zc"><img src="https://railway.com/button.svg" alt="Deploy on Railway"/></a>
+
+---
+
+## Advanced Features
+
+### Message Types
+
+The bot distinguishes between four message types, each with a different prefix format sent to the agent:
+
+| Type | When it applies | Format |
+|------|-----------------|--------|
+| **DM** | Direct message to the bot | `[username (id=123) sent you a direct message] message` |
+| **MENTION** | Message @mentions the bot | `[username (id=123) sent a message in #channel mentioning you] message` |
+| **REPLY** | Reply to bot's previous message | `[username (id=123) replied to you in #channel] message` |
+| **GENERIC** | Other channel messages | `[username (id=123) sent a message in #channel] message` |
+
+This context helps the agent understand where messages come from and respond appropriately.
+
+### Conversation Context
+
+The bot includes recent message history as context for the agent:
+
+**Regular channels:**
+- Fetches the last N messages (configured via `LETTA_CONTEXT_MESSAGE_COUNT`)
+- Includes both user and bot messages
+- Filters out command messages (starting with `!`)
+- Format:
+  ```
+  [Recent conversation context:]
+  - username1: message text
+  - username2: message text
+  [End context]
+
+  [Current message from username]
+  ```
+
+**Threads:**
+- Automatically detects thread messages
+- Fetches thread starter and all replies (up to `LETTA_THREAD_MESSAGE_LIMIT`)
+- Format:
+  ```
+  [Thread: "Thread name"]
+  [Thread started by username: "original message"]
+
+  [Thread conversation history:]
+  - user1: message
+  - user2: reply
+  [End thread context]
+
+  [Current message from user]
+  ```
+
+Thread context takes precedence over regular conversation history when in a thread.
+
+### Message Handling
+
+**Auto-splitting:** Messages longer than Discord's 2000 character limit are automatically split into multiple messages.
+
+**Code block preservation:** When splitting, the bot preserves markdown code blocks, ensuring they aren't broken across messages.
+
+**Code block isolation:** Code blocks are sent as separate messages for easy copying.
+
+### Message Batching
+
+When enabled, messages are accumulated before sending to the agent:
+
+- Each channel has its own message buffer
+- Batch drains when reaching `MESSAGE_BATCH_SIZE` or `MESSAGE_BATCH_TIMEOUT_MS`
+- Format:
+  ```
+  [Batch of 5 messages from #general]
+  1. [username (id=123) mentioned you] message text
+  2. [username2 (id=456)] another message
+  ...
+  ```
+
+This reduces API calls and provides better conversation context for active channels.
+
+### Timer/Heartbeat
+
+When enabled, the bot sends periodic heartbeat events to the agent:
+
+- Fires at random intervals between 1 minute and `TIMER_INTERVAL_MINUTES`
+- Only fires based on `FIRING_PROBABILITY` (default 10%)
+- Requires `DISCORD_CHANNEL_ID` to know where to send responses
+- Allows the agent to initiate conversations or update memory autonomously
