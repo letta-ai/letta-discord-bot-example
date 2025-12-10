@@ -343,8 +343,21 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // Check if the bot is mentioned or if the message is a reply
-  if (RESPOND_TO_MENTIONS && (message.mentions.has(client.user || '') || message.reference)) {
+  // Check if the bot is mentioned or if the message is a reply to the bot
+  const isMention = message.mentions.has(client.user || '');
+  let isReplyToBot = false;
+  
+  // If it's a reply, check if it's to the bot
+  if (message.reference && message.reference.messageId) {
+    try {
+      const originalMessage = await message.channel.messages.fetch(message.reference.messageId);
+      isReplyToBot = originalMessage.author.id === client.user?.id;
+    } catch (error) {
+      console.log(`⚠️ Could not fetch referenced message: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  
+  if (RESPOND_TO_MENTIONS && (isMention || isReplyToBot)) {
     console.log(`📩 Received message from ${message.author.username}: ${message.content}`);
 
     // Check if we can respond in this channel before showing typing indicator
@@ -370,24 +383,15 @@ client.on('messageCreate', async (message) => {
     let msgContent = message.content;
     let messageType = MessageType.MENTION; // Default to mention
 
-    // If it's a reply, fetch the original message and check if it's to the bot
-    if (message.reference && message.reference.messageId) {
-        try {
-          const originalMessage = await message.channel.messages.fetch(message.reference.messageId);
-
-          // Check if the original message was from the bot
-          if (originalMessage.author.id === client.user?.id) {
-            // This is a reply to the bot
-            messageType = MessageType.REPLY;
-            msgContent = `[Replying to previous message: "${truncateMessage(originalMessage.content, MESSAGE_REPLY_TRUNCATE_LENGTH)}"] ${msgContent}`;
-          } else {
-            // This is a reply to someone else, but the bot is mentioned or it's a generic message
-            messageType = message.mentions.has(client.user || '') ? MessageType.MENTION : MessageType.GENERIC;
-          }
-        } catch (error) {
-          console.log(`⚠️ Could not fetch referenced message: ${error instanceof Error ? error.message : error}`);
-          messageType = message.mentions.has(client.user || '') ? MessageType.MENTION : MessageType.GENERIC;
-        }
+    // If it's a reply to the bot, update message type and content
+    if (isReplyToBot && message.reference && message.reference.messageId) {
+      try {
+        const originalMessage = await message.channel.messages.fetch(message.reference.messageId);
+        messageType = MessageType.REPLY;
+        msgContent = `[Replying to previous message: "${truncateMessage(originalMessage.content, MESSAGE_REPLY_TRUNCATE_LENGTH)}"] ${msgContent}`;
+      } catch (error) {
+        console.log(`⚠️ Could not fetch referenced message content: ${error instanceof Error ? error.message : error}`);
+      }
     }
 
     // If batching is enabled, add to batch instead of processing immediately
