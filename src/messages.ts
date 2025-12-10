@@ -136,7 +136,6 @@ const processStream = async (
   response: Stream<LettaStreamingResponse>,
   discordTarget?: OmitPartialGroupDMChannel<Message<boolean>> | { send: (content: string) => Promise<any> }
 ) => {
-  let agentMessageResponse = '';
   const sendAsyncMessage = async (content: string) => {
     if (discordTarget && content.trim()) {
       try {
@@ -158,7 +157,7 @@ const processStream = async (
         switch (chunk.messageType) {
           case 'assistant_message':
             if ('content' in chunk && typeof chunk.content === 'string') {
-              agentMessageResponse += chunk.content;
+              await sendAsyncMessage(chunk.content);
             }
             break;
           case 'stop_reason':
@@ -187,7 +186,7 @@ const processStream = async (
     console.error('❌ Error processing stream:', error);
     throw error;
   }
-  return agentMessageResponse;
+  return "";
 }
 
 // Helper function to fetch and format thread context
