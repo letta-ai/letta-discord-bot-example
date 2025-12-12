@@ -17,6 +17,7 @@ const SURFACE_ERRORS = process.env.SURFACE_ERRORS === 'true';
 const CONTEXT_MESSAGE_COUNT = parseInt(process.env.LETTA_CONTEXT_MESSAGE_COUNT || '5', 10);
 const THREAD_CONTEXT_ENABLED = process.env.LETTA_THREAD_CONTEXT_ENABLED !== 'false'; // Default true
 const THREAD_MESSAGE_LIMIT = parseInt(process.env.LETTA_THREAD_MESSAGE_LIMIT || '50', 10);
+const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
 
 enum MessageType {
   DM = "DM",
@@ -140,7 +141,22 @@ const processStream = async (
     if (discordTarget && content.trim()) {
       try {
         if ('reply' in discordTarget) {
-          await discordTarget.channel.send(content);
+          // Check if we should send to a thread
+          if (REPLY_IN_THREADS && discordTarget.guild !== null) {
+            if (discordTarget.channel.isThread()) {
+              // Already in a thread, send there
+              await discordTarget.channel.send(content);
+            } else if (discordTarget.hasThread && discordTarget.thread) {
+              // Message has an existing thread, send there
+              await discordTarget.thread.send(content);
+            } else {
+              // No thread, send to channel
+              await discordTarget.channel.send(content);
+            }
+          } else {
+            // REPLY_IN_THREADS disabled, send to channel
+            await discordTarget.channel.send(content);
+          }
         } else {
           await discordTarget.send(content);
         }
