@@ -3,6 +3,12 @@ import express from 'express';
 import { Client, GatewayIntentBits, Message, OmitPartialGroupDMChannel, Partials } from 'discord.js';
 import { sendMessage, sendTimerMessage, MessageType, splitMessage } from './messages';
 
+console.log('🚀 Starting Discord bot...');
+console.log('📋 Environment check:');
+console.log('  - DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? '✓ Set' : '✗ Missing');
+console.log('  - LETTA_API_KEY:', process.env.LETTA_API_KEY ? '✓ Set' : '✗ Missing');
+console.log('  - LETTA_AGENT_ID:', process.env.LETTA_AGENT_ID ? '✓ Set' : '✗ Missing');
+console.log('  - LETTA_BASE_URL:', process.env.LETTA_BASE_URL || 'http://localhost:8283 (default)');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -21,6 +27,13 @@ const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
 const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
 const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
 
+console.log('⚙️  Configuration:');
+console.log('  - RESPOND_TO_DMS:', RESPOND_TO_DMS);
+console.log('  - RESPOND_TO_MENTIONS:', RESPOND_TO_MENTIONS);
+console.log('  - RESPOND_TO_GENERIC:', RESPOND_TO_GENERIC);
+console.log('  - REPLY_IN_THREADS:', REPLY_IN_THREADS);
+console.log('  - MESSAGE_BATCH_ENABLED:', MESSAGE_BATCH_ENABLED);
+
 function truncateMessage(message: string, maxLength: number): string {
     if (message.length > maxLength) {
         return message.substring(0, maxLength - 3) + '...'; // Truncate and add ellipsis
@@ -28,6 +41,7 @@ function truncateMessage(message: string, maxLength: number): string {
     return message;
 }
 
+console.log('🔧 Creating Discord client...');
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, // Needed for commands and mentions
@@ -36,6 +50,16 @@ const client = new Client({
     GatewayIntentBits.DirectMessages, // Needed to receive DMs
   ],
   partials: [Partials.Channel] // Required for handling DMs
+});
+
+// Handle process-level errors
+process.on('unhandledRejection', (error) => {
+  console.error('❌ Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught exception:', error);
+  process.exit(1);
 });
 
 client.on('error', (error) => {
@@ -419,8 +443,22 @@ client.on('messageCreate', async (message) => {
 });
 
 // Start the Discord bot
-app.listen(PORT, () => {
-  console.log('Listening on port', PORT);
-  client.login(process.env.DISCORD_TOKEN);
-  startRandomEventTimer();
+console.log(`🌐 Starting Express server on port ${PORT}...`);
+app.listen(PORT, async () => {
+  console.log(`✅ Express server listening on port ${PORT}`);
+  
+  if (!process.env.DISCORD_TOKEN) {
+    console.error('❌ DISCORD_TOKEN not set! Cannot login to Discord.');
+    process.exit(1);
+  }
+  
+  try {
+    console.log('🔐 Attempting Discord login...');
+    await client.login(process.env.DISCORD_TOKEN);
+    console.log('✅ Discord login successful');
+    startRandomEventTimer();
+  } catch (error) {
+    console.error('❌ Discord login failed:', error);
+    process.exit(1);
+  }
 });
