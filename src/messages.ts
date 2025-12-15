@@ -137,6 +137,8 @@ const processStream = async (
   response: Stream<LettaStreamingResponse>,
   discordTarget?: OmitPartialGroupDMChannel<Message<boolean>> | { send: (content: string) => Promise<any> }
 ) => {
+  let createdThread: any = null;
+  
   const sendAsyncMessage = async (content: string) => {
     if (discordTarget && content.trim()) {
       try {
@@ -149,9 +151,14 @@ const processStream = async (
             } else if (discordTarget.hasThread && discordTarget.thread) {
               // Message has an existing thread, send there
               await discordTarget.thread.send(content);
+            } else if (createdThread) {
+              // We already created a thread for this stream, use it
+              await createdThread.send(content);
             } else {
-              // No thread, send to channel
-              await discordTarget.channel.send(content);
+              // No thread exists, create one
+              const threadName = discordTarget.content.substring(0, 50) || 'Chat';
+              createdThread = await discordTarget.startThread({ name: threadName });
+              await createdThread.send(content);
             }
           } else {
             // REPLY_IN_THREADS disabled, send to channel
