@@ -142,30 +142,35 @@ const processStream = async (
   const sendAsyncMessage = async (content: string) => {
     if (discordTarget && content.trim()) {
       try {
-        if ('reply' in discordTarget) {
-          // Check if we should send to a thread
-          if (REPLY_IN_THREADS && discordTarget.guild !== null) {
-            if (discordTarget.channel.isThread()) {
-              // Already in a thread, send there
-              await discordTarget.channel.send(content);
-            } else if (discordTarget.hasThread && discordTarget.thread) {
-              // Message has an existing thread, send there
-              await discordTarget.thread.send(content);
-            } else if (createdThread) {
-              // We already created a thread for this stream, use it
-              await createdThread.send(content);
+        // Split message if it exceeds Discord's limit
+        const chunks = splitMessage(content);
+        
+        for (const chunk of chunks) {
+          if ('reply' in discordTarget) {
+            // Check if we should send to a thread
+            if (REPLY_IN_THREADS && discordTarget.guild !== null) {
+              if (discordTarget.channel.isThread()) {
+                // Already in a thread, send there
+                await discordTarget.channel.send(chunk);
+              } else if (discordTarget.hasThread && discordTarget.thread) {
+                // Message has an existing thread, send there
+                await discordTarget.thread.send(chunk);
+              } else if (createdThread) {
+                // We already created a thread for this stream, use it
+                await createdThread.send(chunk);
+              } else {
+                // No thread exists, create one
+                const threadName = discordTarget.content.substring(0, 50) || 'Chat';
+                createdThread = await discordTarget.startThread({ name: threadName });
+                await createdThread.send(chunk);
+              }
             } else {
-              // No thread exists, create one
-              const threadName = discordTarget.content.substring(0, 50) || 'Chat';
-              createdThread = await discordTarget.startThread({ name: threadName });
-              await createdThread.send(content);
+              // REPLY_IN_THREADS disabled, send to channel
+              await discordTarget.channel.send(chunk);
             }
           } else {
-            // REPLY_IN_THREADS disabled, send to channel
-            await discordTarget.channel.send(content);
+            await discordTarget.send(chunk);
           }
-        } else {
-          await discordTarget.send(content);
         }
       } catch (error) {
         console.error('❌ Error sending async message:', error);
