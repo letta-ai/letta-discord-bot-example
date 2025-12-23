@@ -18,6 +18,10 @@ const CONTEXT_MESSAGE_COUNT = parseInt(process.env.LETTA_CONTEXT_MESSAGE_COUNT |
 const THREAD_CONTEXT_ENABLED = process.env.LETTA_THREAD_CONTEXT_ENABLED !== 'false'; // Default true
 const THREAD_MESSAGE_LIMIT = parseInt(process.env.LETTA_THREAD_MESSAGE_LIMIT || '50', 10);
 const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
+const ENABLE_USER_BLOCKS = process.env.ENABLE_USER_BLOCKS === 'true';
+// User block label prefix - defaults to /<agent_id>/discord/users/ if not set
+const USER_BLOCK_LABEL_PREFIX = process.env.USER_BLOCK_LABEL_PREFIX || 
+  (AGENT_ID ? `/${AGENT_ID}/discord/users/` : '/discord/users/');
 
 enum MessageType {
   DM = "DM",
@@ -25,6 +29,181 @@ enum MessageType {
   REPLY = "REPLY",
   GENERIC = "GENERIC"
 }
+
+// ==================== User Block Management ====================
+// These functions handle dynamic per-user memory blocks that are
+// attached before sending a message and detached after.
+
+/**
+ * Extract all Discord user IDs mentioned in a message.
+ * Matches patterns like <@123456789> or <@!123456789> (nickname mentions)
+ */
+function extractDiscordUserIds(content: string): string[] {
+  const mentionRegex = /<@!?(\d+)>/g;
+  const userIds: Set<string> = new Set();
+  let match;
+  
+  while ((match = mentionRegex.exec(content)) !== null) {
+    userIds.add(match[1]);
+  }
+  
+  return Array.from(userIds);
+}
+
+/**
+ * Search for a block by its exact label.
+ * Returns the block ID if found, null otherwise.
+ */
+async function findBlockByLabel(label: string): Promise<string | null> {
+  try {
+    const blocks = await client.blocks.list({ label });
+    if (blocks && blocks.length > 0 && blocks[0].id) {
+      return blocks[0].id;
+    }
+    return null;
+  } catch (error) {
+    console.error(`❌ Error searching for block with label ${label}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Create a new user block with the given Discord user ID.
+ * Returns the created block ID.
+ */
+async function createUserBlock(userId: string): Promise<string | null> {
+  const label = `${USER_BLOCK_LABEL_PREFIX}${userId}`;
+  try {
+    console.log(`📦 Creating new user block for Discord user ${userId}`);
+    const block = await client.blocks.create({
+      label,
+      value: '[no information about this user yet]',
+      description: 'Information about a discord user. I should keep this updated to help them.',
+      limit: 5000
+    });
+    if (!block.id) {
+      console.error(`❌ Created block but no ID returned for ${userId}`);
+      return null;
+    }
+    console.log(`✅ Created user block: ${block.id}`);
+    return block.id;
+  } catch (error) {
+    console.error(`❌ Error creating user block for ${userId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get or create a user block for the given Discord user ID.
+ * Returns the block ID.
+ */
+async function getOrCreateUserBlock(userId: string): Promise<string | null> {
+  const label = `${USER_BLOCK_LABEL_PREFIX}${userId}`;
+  
+  // First, try to find existing block
+  const existingBlockId = await findBlockByLabel(label);
+  if (existingBlockId) {
+    console.log(`📦 Found existing user block for Discord user ${userId}: ${existingBlockId}`);
+    return existingBlockId;
+  }
+  
+  // Block doesn't exist, create it
+  return await createUserBlock(userId);
+}
+
+/**
+ * Attach a block to the agent.
+ */
+async function attachBlockToAgent(blockId: string): Promise<boolean> {
+  if (!AGENT_ID) return false;
+  
+  try {
+    await client.agents.blocks.attach(AGENT_ID, blockId);
+    console.log(`🔗 Attached block ${blockId} to agent`);
+    return true;
+  } catch (error: any) {
+    // Ignore "already attached" errors
+    if (error?.message?.includes('already attached') || error?.statusCode === 409) {
+      console.log(`🔗 Block ${blockId} already attached to agent`);
+      return true;
+    }
+    console.error(`❌ Error attaching block ${blockId} to agent:`, error);
+    return false;
+  }
+}
+
+/**
+ * Detach a block from the agent.
+ */
+async function detachBlockFromAgent(blockId: string): Promise<boolean> {
+  if (!AGENT_ID) return false;
+  
+  try {
+    await client.agents.blocks.detach(AGENT_ID, blockId);
+    console.log(`🔓 Detached block ${blockId} from agent`);
+    return true;
+  } catch (error: any) {
+    // Ignore "not attached" errors
+    if (error?.message?.includes('not attached') || error?.statusCode === 404) {
+      console.log(`🔓 Block ${blockId} was not attached to agent`);
+      return true;
+    }
+    console.error(`❌ Error detaching block ${blockId} from agent:`, error);
+    return false;
+  }
+}
+
+/**
+ * Attach user blocks for all mentioned users in the message.
+ * Also includes the sender's block.
+ * Returns array of block IDs that were attached (for later cleanup).
+ */
+async function attachUserBlocks(
+  senderId: string,
+  messageContent: string
+): Promise<string[]> {
+  if (!ENABLE_USER_BLOCKS) return [];
+  
+  console.log(`📦 User blocks enabled, processing user mentions...`);
+  
+  // Collect all user IDs: sender + mentioned users
+  const mentionedUserIds = extractDiscordUserIds(messageContent);
+  const allUserIds = new Set([senderId, ...mentionedUserIds]);
+  
+  console.log(`📦 Found ${allUserIds.size} users to attach blocks for: ${Array.from(allUserIds).join(', ')}`);
+  
+  const attachedBlockIds: string[] = [];
+  
+  for (const userId of allUserIds) {
+    const blockId = await getOrCreateUserBlock(userId);
+    if (blockId) {
+      const attached = await attachBlockToAgent(blockId);
+      if (attached) {
+        attachedBlockIds.push(blockId);
+      }
+    }
+  }
+  
+  console.log(`📦 Successfully attached ${attachedBlockIds.length} user blocks`);
+  return attachedBlockIds;
+}
+
+/**
+ * Detach all user blocks that were attached for this message.
+ */
+async function detachUserBlocks(blockIds: string[]): Promise<void> {
+  if (!ENABLE_USER_BLOCKS || blockIds.length === 0) return;
+  
+  console.log(`📦 Detaching ${blockIds.length} user blocks...`);
+  
+  for (const blockId of blockIds) {
+    await detachBlockFromAgent(blockId);
+  }
+  
+  console.log(`📦 Finished detaching user blocks`);
+}
+
+// ==================== End User Block Management ====================
 
 // Helper function to split text that doesn't contain code blocks
 function splitText(text: string, limit: number): string[] {
@@ -488,6 +667,9 @@ async function sendMessage(
     console.log(`⌨️  No typing indicator (shouldRespond=false)`);
   }
 
+  // Attach user-specific memory blocks before sending message
+  const attachedUserBlockIds = await attachUserBlocks(senderId, message);
+
   try {
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
     console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
@@ -513,6 +695,8 @@ async function sendMessage(
     if (typingInterval) {
       clearInterval(typingInterval);
     }
+    // Detach user-specific memory blocks after message is processed
+    await detachUserBlocks(attachedUserBlockIds);
   }
 }
 
