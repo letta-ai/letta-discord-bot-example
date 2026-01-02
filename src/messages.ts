@@ -1,15 +1,13 @@
-import { LettaClient } from "@letta-ai/letta-client";
-import { LettaStreamingResponse } from "@letta-ai/letta-client/api/resources/agents/resources/messages/types/LettaStreamingResponse";
-import { Stream } from "@letta-ai/letta-client/core";
+import Letta from "@letta-ai/letta-client";
 import { Message, OmitPartialGroupDMChannel, Collection } from "discord.js";
 
 // Discord message length limit
 const DISCORD_MESSAGE_LIMIT = 2000;
 
 // If the token is not set, just use a dummy value
-const client = new LettaClient({
-  token: process.env.LETTA_API_KEY || 'your_letta_api_key',
-  baseUrl: process.env.LETTA_BASE_URL || 'https://api.letta.com',
+const client = new Letta({
+  apiKey: process.env.LETTA_API_KEY || 'your_letta_api_key',
+  baseURL: process.env.LETTA_BASE_URL || 'https://api.letta.com',
 });
 const AGENT_ID = process.env.LETTA_AGENT_ID;
 const USE_SENDER_PREFIX = process.env.LETTA_USE_SENDER_PREFIX === 'true';
@@ -134,7 +132,7 @@ function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): s
 
 // Helper function to process stream
 const processStream = async (
-  response: Stream<LettaStreamingResponse>,
+  response: AsyncIterable<any>,
   discordTarget?: OmitPartialGroupDMChannel<Message<boolean>> | { send: (content: string) => Promise<any> }
 ) => {
   let createdThread: any = null;
@@ -176,8 +174,8 @@ const processStream = async (
   try {
     for await (const chunk of response) {
       // Handle different message types that might be returned
-      if ('messageType' in chunk) {
-        switch (chunk.messageType) {
+      if ('message_type' in chunk) {
+        switch (chunk.message_type) {
           case 'assistant_message':
             if ('content' in chunk && typeof chunk.content === 'string') {
               await sendAsyncMessage(chunk.content);
@@ -198,11 +196,14 @@ const processStream = async (
           case 'usage_statistics':
             console.log('📊 Usage stats:', chunk);
             break;
+          case 'ping':
+            // Keep-alive ping from server - ignore silently
+            break;
           default:
-            console.log('📨 Unknown message type:', chunk.messageType, chunk);
+            console.log('📨 Unknown message type:', chunk.message_type, chunk);
         }
       } else {
-        console.log('❓ Chunk without messageType:', chunk);
+        console.log('❓ Chunk without message_type:', chunk);
       }
     }
   } catch (error) {
@@ -363,7 +364,7 @@ async function sendTimerMessage(channel?: { send: (content: string) => Promise<a
 
   try {
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID}): ${JSON.stringify(lettaMessage)}`);
-    const response = await client.agents.messages.createStream(AGENT_ID, {
+    const response = await client.agents.messages.stream(AGENT_ID, {
       messages: [lettaMessage]
     });
 
@@ -486,7 +487,7 @@ async function sendMessage(
   try {
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
     console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
-    const response = await client.agents.messages.createStream(AGENT_ID, {
+    const response = await client.agents.messages.stream(AGENT_ID, {
       messages: [lettaMessage]
     });
 
