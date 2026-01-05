@@ -21,6 +21,9 @@ const ENABLE_USER_BLOCKS = process.env.ENABLE_USER_BLOCKS === 'true';
 const USER_BLOCK_LABEL_PREFIX = process.env.USER_BLOCK_LABEL_PREFIX || 
   (AGENT_ID ? `/${AGENT_ID}/discord/users/` : '/discord/users/');
 
+// Track active message turns to prevent cleanup during processing
+let activeMessageTurns = 0;
+
 enum MessageType {
   DM = "DM",
   MENTION = "MENTION",
@@ -54,8 +57,10 @@ function extractDiscordUserIds(content: string): string[] {
  */
 async function findBlockByLabel(label: string): Promise<string | null> {
   try {
-    const blocks = await client.blocks.list({ label });
-    if (blocks && blocks.length > 0 && blocks[0].id) {
+    // SDK v1.0: list() returns a page object with .items array
+    const blocksPage = await client.blocks.list({ label });
+    const blocks = blocksPage.items || [];
+    if (blocks.length > 0 && blocks[0].id) {
       return blocks[0].id;
     }
     return null;
@@ -116,7 +121,8 @@ async function attachBlockToAgent(blockId: string): Promise<boolean> {
   if (!AGENT_ID) return false;
   
   try {
-    await client.agents.blocks.attach(AGENT_ID, blockId);
+    // SDK v1.0: first param is blockId, second is { agent_id }
+    await client.agents.blocks.attach(blockId, { agent_id: AGENT_ID });
     console.log(`🔗 Attached block ${blockId} to agent`);
     return true;
   } catch (error: any) {
@@ -137,7 +143,8 @@ async function detachBlockFromAgent(blockId: string): Promise<boolean> {
   if (!AGENT_ID) return false;
   
   try {
-    await client.agents.blocks.detach(AGENT_ID, blockId);
+    // SDK v1.0: first param is blockId, second is { agent_id }
+    await client.agents.blocks.detach(blockId, { agent_id: AGENT_ID });
     console.log(`🔓 Detached block ${blockId} from agent`);
     return true;
   } catch (error: any) {
@@ -199,6 +206,59 @@ async function detachUserBlocks(blockIds: string[]): Promise<void> {
   }
   
   console.log(`📦 Finished detaching user blocks`);
+}
+
+/**
+ * Cleanup function to detach all accumulated user blocks from the agent.
+ * Call this at startup or periodically to clean up orphaned blocks.
+ * Skips cleanup if any message turns are currently in progress.
+ */
+async function cleanupUserBlocks(): Promise<number> {
+  if (!ENABLE_USER_BLOCKS || !AGENT_ID) {
+    console.log(`🧹 User blocks cleanup skipped (feature disabled or no agent ID)`);
+    return 0;
+  }
+  
+  // Don't run cleanup if any message turns are in progress
+  if (activeMessageTurns > 0) {
+    console.log(`🧹 User blocks cleanup skipped (${activeMessageTurns} active message turn(s) in progress)`);
+    return 0;
+  }
+  
+  console.log(`🧹 Starting cleanup of accumulated user blocks...`);
+  
+  try {
+    // Get all blocks currently attached to the agent
+    const agentBlocksPage = await client.agents.blocks.list(AGENT_ID);
+    const agentBlocks = agentBlocksPage.items || [];
+    
+    // Filter to only user blocks (those with our prefix in the label)
+    const userBlocks = agentBlocks.filter(block => 
+      block.label && block.label.startsWith(USER_BLOCK_LABEL_PREFIX)
+    );
+    
+    if (userBlocks.length === 0) {
+      console.log(`🧹 No accumulated user blocks found`);
+      return 0;
+    }
+    
+    console.log(`🧹 Found ${userBlocks.length} user blocks to clean up`);
+    
+    // Detach each user block
+    let detachedCount = 0;
+    for (const block of userBlocks) {
+      if (block.id) {
+        const success = await detachBlockFromAgent(block.id);
+        if (success) detachedCount++;
+      }
+    }
+    
+    console.log(`🧹 Cleanup complete: detached ${detachedCount}/${userBlocks.length} user blocks`);
+    return detachedCount;
+  } catch (error) {
+    console.error(`❌ Error during user blocks cleanup:`, error);
+    return 0;
+  }
 }
 
 // ==================== End User Block Management ====================
@@ -668,6 +728,9 @@ async function sendMessage(
     console.log(`⌨️  No typing indicator (shouldRespond=false)`);
   }
 
+  // Track active turn to prevent cleanup from running mid-conversation
+  activeMessageTurns++;
+  
   // Attach user-specific memory blocks before sending message
   const attachedUserBlockIds = await attachUserBlocks(senderId, message);
 
@@ -698,7 +761,9 @@ async function sendMessage(
     }
     // Detach user-specific memory blocks after message is processed
     await detachUserBlocks(attachedUserBlockIds);
+    // Decrement active turn counter
+    activeMessageTurns--;
   }
 }
 
-export { sendMessage, sendTimerMessage, MessageType, splitMessage };
+export { sendMessage, sendTimerMessage, MessageType, splitMessage, cleanupUserBlocks };
