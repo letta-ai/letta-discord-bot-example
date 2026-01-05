@@ -226,11 +226,17 @@ async function cleanupUserBlocks(): Promise<number> {
   }
   
   console.log(`🧹 Starting cleanup of accumulated user blocks...`);
+  console.log(`🧹 Looking for blocks with prefix: "${USER_BLOCK_LABEL_PREFIX}"`);
   
   try {
     // Get all blocks currently attached to the agent
     const agentBlocksPage = await client.agents.blocks.list(AGENT_ID);
     const agentBlocks = agentBlocksPage.items || [];
+    
+    console.log(`🧹 Agent has ${agentBlocks.length} total blocks attached`);
+    if (agentBlocks.length > 0) {
+      console.log(`🧹 Block labels: ${agentBlocks.map(b => b.label).join(', ')}`);
+    }
     
     // Filter to only user blocks (those with our prefix in the label)
     const userBlocks = agentBlocks.filter(block => 
@@ -238,7 +244,7 @@ async function cleanupUserBlocks(): Promise<number> {
     );
     
     if (userBlocks.length === 0) {
-      console.log(`🧹 No accumulated user blocks found`);
+      console.log(`🧹 No accumulated user blocks found matching prefix`);
       return 0;
     }
     
