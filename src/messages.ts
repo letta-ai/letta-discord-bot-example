@@ -1,15 +1,13 @@
-import { LettaClient } from "@letta-ai/letta-client";
-import { LettaStreamingResponse } from "@letta-ai/letta-client/api/resources/agents/resources/messages/types/LettaStreamingResponse";
-import { Stream } from "@letta-ai/letta-client/core";
+import Letta from "@letta-ai/letta-client";
 import { Message, OmitPartialGroupDMChannel, Collection } from "discord.js";
 
 // Discord message length limit
 const DISCORD_MESSAGE_LIMIT = 2000;
 
 // If the token is not set, just use a dummy value
-const client = new LettaClient({
-  token: process.env.LETTA_API_KEY || 'your_letta_api_key',
-  baseUrl: process.env.LETTA_BASE_URL || 'https://api.letta.com',
+const client = new Letta({
+  apiKey: process.env.LETTA_API_KEY || 'your_letta_api_key',
+  baseURL: process.env.LETTA_BASE_URL || 'https://api.letta.com',
 });
 const AGENT_ID = process.env.LETTA_AGENT_ID;
 const USE_SENDER_PREFIX = process.env.LETTA_USE_SENDER_PREFIX === 'true';
@@ -22,6 +20,9 @@ const ENABLE_USER_BLOCKS = process.env.ENABLE_USER_BLOCKS === 'true';
 // User block label prefix - defaults to /<agent_id>/discord/users/ if not set
 const USER_BLOCK_LABEL_PREFIX = process.env.USER_BLOCK_LABEL_PREFIX || 
   (AGENT_ID ? `/${AGENT_ID}/discord/users/` : '/discord/users/');
+
+// Track active message turns to prevent cleanup during processing
+let activeMessageTurns = 0;
 
 enum MessageType {
   DM = "DM",
@@ -56,8 +57,10 @@ function extractDiscordUserIds(content: string): string[] {
  */
 async function findBlockByLabel(label: string): Promise<string | null> {
   try {
-    const blocks = await client.blocks.list({ label });
-    if (blocks && blocks.length > 0 && blocks[0].id) {
+    // SDK v1.0: list() returns a page object with .items array
+    const blocksPage = await client.blocks.list({ label });
+    const blocks = blocksPage.items || [];
+    if (blocks.length > 0 && blocks[0].id) {
       return blocks[0].id;
     }
     return null;
@@ -118,7 +121,8 @@ async function attachBlockToAgent(blockId: string): Promise<boolean> {
   if (!AGENT_ID) return false;
   
   try {
-    await client.agents.blocks.attach(AGENT_ID, blockId);
+    // SDK v1.0: first param is blockId, second is { agent_id }
+    await client.agents.blocks.attach(blockId, { agent_id: AGENT_ID });
     console.log(`🔗 Attached block ${blockId} to agent`);
     return true;
   } catch (error: any) {
@@ -139,7 +143,8 @@ async function detachBlockFromAgent(blockId: string): Promise<boolean> {
   if (!AGENT_ID) return false;
   
   try {
-    await client.agents.blocks.detach(AGENT_ID, blockId);
+    // SDK v1.0: first param is blockId, second is { agent_id }
+    await client.agents.blocks.detach(blockId, { agent_id: AGENT_ID });
     console.log(`🔓 Detached block ${blockId} from agent`);
     return true;
   } catch (error: any) {
@@ -201,6 +206,59 @@ async function detachUserBlocks(blockIds: string[]): Promise<void> {
   }
   
   console.log(`📦 Finished detaching user blocks`);
+}
+
+/**
+ * Cleanup function to detach all accumulated user blocks from the agent.
+ * Call this at startup or periodically to clean up orphaned blocks.
+ * Skips cleanup if any message turns are currently in progress.
+ */
+async function cleanupUserBlocks(): Promise<number> {
+  if (!ENABLE_USER_BLOCKS || !AGENT_ID) {
+    console.log(`🧹 User blocks cleanup skipped (feature disabled or no agent ID)`);
+    return 0;
+  }
+  
+  // Don't run cleanup if any message turns are in progress
+  if (activeMessageTurns > 0) {
+    console.log(`🧹 User blocks cleanup skipped (${activeMessageTurns} active message turn(s) in progress)`);
+    return 0;
+  }
+  
+  console.log(`🧹 Starting cleanup of accumulated user blocks...`);
+  
+  try {
+    // Get all blocks currently attached to the agent
+    const agentBlocksPage = await client.agents.blocks.list(AGENT_ID);
+    const agentBlocks = agentBlocksPage.items || [];
+    
+    // Filter to only user blocks (those with our prefix in the label)
+    const userBlocks = agentBlocks.filter(block => 
+      block.label && block.label.startsWith(USER_BLOCK_LABEL_PREFIX)
+    );
+    
+    if (userBlocks.length === 0) {
+      console.log(`🧹 No accumulated user blocks found`);
+      return 0;
+    }
+    
+    console.log(`🧹 Found ${userBlocks.length} user blocks to clean up`);
+    
+    // Detach each user block
+    let detachedCount = 0;
+    for (const block of userBlocks) {
+      if (block.id) {
+        const success = await detachBlockFromAgent(block.id);
+        if (success) detachedCount++;
+      }
+    }
+    
+    console.log(`🧹 Cleanup complete: detached ${detachedCount}/${userBlocks.length} user blocks`);
+    return detachedCount;
+  } catch (error) {
+    console.error(`❌ Error during user blocks cleanup:`, error);
+    return 0;
+  }
 }
 
 // ==================== End User Block Management ====================
@@ -313,7 +371,7 @@ function splitMessage(content: string, limit: number = DISCORD_MESSAGE_LIMIT): s
 
 // Helper function to process stream
 const processStream = async (
-  response: Stream<LettaStreamingResponse>,
+  response: AsyncIterable<any>,
   discordTarget?: OmitPartialGroupDMChannel<Message<boolean>> | { send: (content: string) => Promise<any> }
 ) => {
   let createdThread: any = null;
@@ -360,8 +418,8 @@ const processStream = async (
   try {
     for await (const chunk of response) {
       // Handle different message types that might be returned
-      if ('messageType' in chunk) {
-        switch (chunk.messageType) {
+      if ('message_type' in chunk) {
+        switch (chunk.message_type) {
           case 'assistant_message':
             if ('content' in chunk && typeof chunk.content === 'string') {
               await sendAsyncMessage(chunk.content);
@@ -382,11 +440,14 @@ const processStream = async (
           case 'usage_statistics':
             console.log('📊 Usage stats:', chunk);
             break;
+          case 'ping':
+            // Keep-alive ping from server - ignore silently
+            break;
           default:
-            console.log('📨 Unknown message type:', chunk.messageType, chunk);
+            console.log('📨 Unknown message type:', chunk.message_type, chunk);
         }
       } else {
-        console.log('❓ Chunk without messageType:', chunk);
+        console.log('❓ Chunk without message_type:', chunk);
       }
     }
   } catch (error) {
@@ -547,7 +608,7 @@ async function sendTimerMessage(channel?: { send: (content: string) => Promise<a
 
   try {
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID}): ${JSON.stringify(lettaMessage)}`);
-    const response = await client.agents.messages.createStream(AGENT_ID, {
+    const response = await client.agents.messages.stream(AGENT_ID, {
       messages: [lettaMessage]
     });
 
@@ -667,13 +728,16 @@ async function sendMessage(
     console.log(`⌨️  No typing indicator (shouldRespond=false)`);
   }
 
+  // Track active turn to prevent cleanup from running mid-conversation
+  activeMessageTurns++;
+  
   // Attach user-specific memory blocks before sending message
   const attachedUserBlockIds = await attachUserBlocks(senderId, message);
 
   try {
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
     console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
-    const response = await client.agents.messages.createStream(AGENT_ID, {
+    const response = await client.agents.messages.stream(AGENT_ID, {
       messages: [lettaMessage]
     });
 
@@ -697,7 +761,9 @@ async function sendMessage(
     }
     // Detach user-specific memory blocks after message is processed
     await detachUserBlocks(attachedUserBlockIds);
+    // Decrement active turn counter
+    activeMessageTurns--;
   }
 }
 
-export { sendMessage, sendTimerMessage, MessageType, splitMessage };
+export { sendMessage, sendTimerMessage, MessageType, splitMessage, cleanupUserBlocks };

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { Client, GatewayIntentBits, Message, OmitPartialGroupDMChannel, Partials } from 'discord.js';
-import { sendMessage, sendTimerMessage, MessageType, splitMessage } from './messages';
+import { sendMessage, sendTimerMessage, MessageType, splitMessage, cleanupUserBlocks } from './messages';
 
 console.log('🚀 Starting Discord bot...');
 console.log('📋 Environment check:');
@@ -26,6 +26,7 @@ const MESSAGE_BATCH_ENABLED = process.env.MESSAGE_BATCH_ENABLED === 'true';
 const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
 const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
 const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
+const USER_BLOCKS_CLEANUP_INTERVAL_MINUTES = parseInt(process.env.USER_BLOCKS_CLEANUP_INTERVAL_MINUTES || '60', 10);
 
 console.log('⚙️  Configuration:');
 console.log('  - RESPOND_TO_DMS:', RESPOND_TO_DMS);
@@ -67,10 +68,23 @@ client.on('error', (error) => {
 });
 
 // Discord Bot Ready Event
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`🤖 Logged in as ${client.user?.tag}!`);
   if (MESSAGE_BATCH_ENABLED) {
     console.log(`📦 Message batching enabled: ${MESSAGE_BATCH_SIZE} messages or ${MESSAGE_BATCH_TIMEOUT_MS}ms timeout`);
+  }
+  
+  // Clean up any accumulated user blocks from previous sessions
+  await cleanupUserBlocks();
+  
+  // Start periodic cleanup timer for user blocks
+  if (USER_BLOCKS_CLEANUP_INTERVAL_MINUTES > 0) {
+    const intervalMs = USER_BLOCKS_CLEANUP_INTERVAL_MINUTES * 60 * 1000;
+    console.log(`🧹 User blocks cleanup scheduled every ${USER_BLOCKS_CLEANUP_INTERVAL_MINUTES} minutes`);
+    setInterval(async () => {
+      console.log(`🧹 Running scheduled user blocks cleanup...`);
+      await cleanupUserBlocks();
+    }, intervalMs);
   }
 });
 

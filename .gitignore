@@ -1,2 +1,4 @@
 node_modules
-.envdist/
+.env
+dist/
+.letta/
