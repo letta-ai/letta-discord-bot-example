@@ -16,7 +16,8 @@
     "@letta-ai/letta-client": "^1.6.2",
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "openai": "^6.15.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

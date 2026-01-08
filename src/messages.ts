@@ -1,5 +1,10 @@
 import Letta from "@letta-ai/letta-client";
-import { Message, OmitPartialGroupDMChannel, Collection } from "discord.js";
+import { Message, OmitPartialGroupDMChannel, Collection, Attachment } from "discord.js";
+import OpenAI from "openai";
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 // Discord message length limit
 const DISCORD_MESSAGE_LIMIT = 2000;
@@ -24,6 +29,12 @@ const USER_BLOCK_LABEL_PREFIX = process.env.USER_BLOCK_LABEL_PREFIX ||
 // Image handling configuration
 const ENABLE_IMAGE_HANDLING = process.env.ENABLE_IMAGE_HANDLING === 'true';
 const IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB limit for Letta
+
+// Voice transcription configuration
+const ENABLE_VOICE_TRANSCRIPTION = process.env.ENABLE_VOICE_TRANSCRIPTION === 'true';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe';
+const VOICE_MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25MB limit for OpenAI
 
 // Track active message turns to prevent cleanup during processing
 let activeMessageTurns = 0;
@@ -352,6 +363,135 @@ async function extractImageAttachments(
 }
 
 // ==================== End Image Handling ====================
+
+// ==================== Voice Transcription ====================
+
+// Cache ffmpeg availability check
+let ffmpegAvailable: boolean | null = null;
+
+/**
+ * Check if ffmpeg is installed on the system.
+ * Result is cached after first check.
+ */
+function checkFfmpegInstalled(): boolean {
+  if (ffmpegAvailable !== null) return ffmpegAvailable;
+  
+  try {
+    execSync('ffmpeg -version', { stdio: 'pipe' });
+    ffmpegAvailable = true;
+    console.log('✅ ffmpeg is available for voice transcription');
+  } catch {
+    console.warn('⚠️ ffmpeg not installed - voice transcription will be skipped');
+    ffmpegAvailable = false;
+  }
+  return ffmpegAvailable;
+}
+
+/**
+ * Check if an attachment is a voice message.
+ * Discord voice messages are OGG files with duration and waveform properties.
+ */
+function isVoiceMessage(attachment: Attachment): boolean {
+  return (
+    (attachment.contentType?.startsWith('audio/ogg') ?? false) &&
+    attachment.duration !== null &&
+    attachment.waveform !== null
+  );
+}
+
+/**
+ * Convert audio file to mp3 using ffmpeg (required for OpenAI).
+ * Returns path to the mp3 file.
+ */
+function convertToMp3(inputPath: string): string {
+  const outputPath = inputPath.replace(/\.[^.]+$/, '.mp3');
+  execSync(`ffmpeg -y -i "${inputPath}" -ac 1 -ar 16000 "${outputPath}"`, {
+    stdio: 'pipe'
+  });
+  return outputPath;
+}
+
+/**
+ * Transcribe an audio file using OpenAI's API.
+ */
+async function transcribeAudio(audioPath: string): Promise<string> {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
+  
+  const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+  const file = fs.createReadStream(audioPath);
+  
+  const result = await openai.audio.transcriptions.create({
+    model: OPENAI_TRANSCRIBE_MODEL,
+    file: file,
+  });
+  
+  return result.text || '';
+}
+
+/**
+ * Extract and transcribe voice messages from Discord attachments.
+ * Returns transcribed text or null if no voice messages or transcription disabled.
+ */
+async function extractVoiceTranscription(
+  message: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<string | null> {
+  if (!ENABLE_VOICE_TRANSCRIPTION) return null;
+  if (!OPENAI_API_KEY) {
+    console.warn('⚠️ Voice transcription enabled but OPENAI_API_KEY not set');
+    return null;
+  }
+  if (!checkFfmpegInstalled()) return null;
+  
+  for (const [, attachment] of message.attachments) {
+    if (!isVoiceMessage(attachment)) continue;
+    
+    // Check size limit
+    if (attachment.size && attachment.size > VOICE_MAX_SIZE_BYTES) {
+      console.log(`🎤 Skipping large voice message: ${(attachment.size / 1024 / 1024).toFixed(1)}MB > 25MB limit`);
+      continue;
+    }
+    
+    try {
+      console.log(`🎤 Transcribing voice message (${attachment.duration}s)...`);
+      
+      // Download the audio file
+      const response = await fetch(attachment.url);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      
+      // Save to temp file
+      const tmpDir = os.tmpdir();
+      const inputPath = path.join(tmpDir, `discord_voice_${Date.now()}.ogg`);
+      fs.writeFileSync(inputPath, buffer);
+      
+      try {
+        // Convert to mp3 (OpenAI doesn't support ogg/opus)
+        const mp3Path = convertToMp3(inputPath);
+        
+        try {
+          // Transcribe via OpenAI
+          const transcript = await transcribeAudio(mp3Path);
+          console.log(`🎤 Transcription complete: "${transcript.substring(0, 50)}${transcript.length > 50 ? '...' : ''}"`);
+          return transcript;
+        } finally {
+          // Cleanup mp3
+          if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path);
+        }
+      } finally {
+        // Cleanup original ogg
+        if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+      }
+    } catch (error) {
+      console.error(`❌ Voice transcription failed:`, error);
+      return `[Voice message transcription failed: ${error instanceof Error ? error.message : error}]`;
+    }
+  }
+  
+  return null;
+}
+
+// ==================== End Voice Transcription ====================
 
 // Helper function to split text that doesn't contain code blocks
 function splitText(text: string, limit: number): string[] {
@@ -799,6 +939,12 @@ async function sendMessage(
 
   // Extract and encode image attachments (only from current message, not batched history)
   const imageBlocks = await extractImageAttachments(discordMessageObject);
+
+  // Extract and transcribe voice messages (only from current message)
+  const voiceTranscript = await extractVoiceTranscription(discordMessageObject);
+  if (voiceTranscript) {
+    messageContent += `\n\n[Transcribed voice message]\n${voiceTranscript}`;
+  }
 
   // If LETTA_USE_SENDER_PREFIX, then we put the receipt in the front of the message
   // If it's false, then we put the receipt in the name field (the backend must handle it)
