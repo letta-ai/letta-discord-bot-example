@@ -776,13 +776,14 @@ async function sendMessage(
       messageContent += `\n\n[You CAN respond to these messages. Your response will be sent to Discord.]`;
     }
   } else if (USE_SENDER_PREFIX) {
+    const timestamp = discordMessageObject.createdAt.toISOString();
     const currentMessagePrefix = messageType === MessageType.MENTION
-      ? `[${senderNameReceipt} sent a message${channelContext} mentioning you] ${message}`
+      ? `[${timestamp}] [${senderNameReceipt} sent a message${channelContext} mentioning you] ${message}`
       : messageType === MessageType.REPLY
-        ? `[${senderNameReceipt} replied to you${channelContext}] ${message}`
+        ? `[${timestamp}] [${senderNameReceipt} replied to you${channelContext}] ${message}`
         : messageType === MessageType.DM
-          ? `[${senderNameReceipt} sent you a direct message] ${message}`
-          : `[${senderNameReceipt} sent a message${channelContext}] ${message}`;
+          ? `[${timestamp}] [${senderNameReceipt} sent you a direct message] ${message}`
+          : `[${timestamp}] [${senderNameReceipt} sent a message${channelContext}] ${message}`;
 
     // Add notice about whether agent can respond in this channel
     const responseNotice = !shouldRespond && channelContext
