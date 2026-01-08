@@ -21,6 +21,10 @@ const ENABLE_USER_BLOCKS = process.env.ENABLE_USER_BLOCKS === 'true';
 const USER_BLOCK_LABEL_PREFIX = process.env.USER_BLOCK_LABEL_PREFIX || 
   (AGENT_ID ? `/${AGENT_ID}/discord/users/` : '/discord/users/');
 
+// Image handling configuration
+const ENABLE_IMAGE_HANDLING = process.env.ENABLE_IMAGE_HANDLING === 'true';
+const IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB limit for Letta
+
 // Track active message turns to prevent cleanup during processing
 let activeMessageTurns = 0;
 
@@ -268,6 +272,86 @@ async function cleanupUserBlocks(): Promise<number> {
 }
 
 // ==================== End User Block Management ====================
+
+// ==================== Image Handling ====================
+
+// Type for image content blocks sent to Letta
+type ImageContentBlock = {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: string;
+    data: string;
+  };
+};
+
+/**
+ * Fetch and encode image attachments from a Discord message as base64.
+ * Returns array of image objects ready for Letta's multi-modal API.
+ * Skips images over 5MB.
+ */
+async function extractImageAttachments(
+  message: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<ImageContentBlock[]> {
+  if (!ENABLE_IMAGE_HANDLING) return [];
+  
+  const images: ImageContentBlock[] = [];
+  const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  
+  for (const [, attachment] of message.attachments) {
+    // Check size limit first (Discord provides size in bytes)
+    if (attachment.size && attachment.size > IMAGE_MAX_SIZE_BYTES) {
+      console.log(`🖼️  Skipping large image: ${attachment.name || 'unnamed'} (${(attachment.size / 1024 / 1024).toFixed(1)}MB > 5MB limit)`);
+      continue;
+    }
+    
+    // Determine media type from contentType or extension
+    let mediaType = attachment.contentType;
+    if (!mediaType || !supportedTypes.includes(mediaType)) {
+      // Try to infer from extension
+      const ext = attachment.url.split('.').pop()?.toLowerCase().split('?')[0];
+      if (ext === 'png') mediaType = 'image/png';
+      else if (ext === 'jpg' || ext === 'jpeg') mediaType = 'image/jpeg';
+      else if (ext === 'gif') mediaType = 'image/gif';
+      else if (ext === 'webp') mediaType = 'image/webp';
+      else continue; // Skip non-image attachments
+    }
+    
+    try {
+      // Fetch and encode as base64
+      const response = await fetch(attachment.url);
+      const buffer = await response.arrayBuffer();
+      
+      // Double-check size after fetch (in case Discord's size was wrong)
+      if (buffer.byteLength > IMAGE_MAX_SIZE_BYTES) {
+        console.log(`🖼️  Skipping large image after fetch: ${attachment.name || 'unnamed'} (${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+        continue;
+      }
+      
+      const base64Data = Buffer.from(buffer).toString('base64');
+      
+      images.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: mediaType,
+          data: base64Data
+        }
+      });
+      console.log(`🖼️  Encoded image: ${attachment.name || 'unnamed'} (${mediaType}, ${(buffer.byteLength / 1024).toFixed(0)}KB)`);
+    } catch (error) {
+      console.error(`❌ Failed to fetch image ${attachment.url}:`, error);
+    }
+  }
+  
+  if (images.length > 0) {
+    console.log(`🖼️  Total images encoded: ${images.length}`);
+  }
+  
+  return images;
+}
+
+// ==================== End Image Handling ====================
 
 // Helper function to split text that doesn't contain code blocks
 function splitText(text: string, limit: number): string[] {
@@ -712,12 +796,21 @@ async function sendMessage(
     messageContent = conversationHistory + message;
   }
 
+  // Extract and encode image attachments (only from current message, not batched history)
+  const imageBlocks = await extractImageAttachments(discordMessageObject);
+
   // If LETTA_USE_SENDER_PREFIX, then we put the receipt in the front of the message
   // If it's false, then we put the receipt in the name field (the backend must handle it)
+  // Use content blocks array if images present, otherwise plain string
   const lettaMessage = {
     role: "user" as const,
     name: USE_SENDER_PREFIX ? undefined : senderNameReceipt,
-    content: messageContent
+    content: imageBlocks.length > 0
+      ? [
+          { type: "text" as const, text: messageContent },
+          ...imageBlocks
+        ]
+      : messageContent
   };
 
   // Typing indicator: pulse now and every 8 s until cleaned up (only if we should respond)
