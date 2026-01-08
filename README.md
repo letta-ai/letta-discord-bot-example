@@ -225,6 +225,38 @@ Environment variables can be controlled by setting them in your `.env` file or b
 | `MESSAGE_BATCH_SIZE` | Max messages per batch | `10` |
 | `MESSAGE_BATCH_TIMEOUT_MS` | Auto-drain timeout | `30000` |
 
+#### Thread Replies
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REPLY_IN_THREADS` | Reply in threads (creates new thread if needed) | `false` |
+
+#### Image Handling
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_IMAGE_HANDLING` | Forward image attachments to the agent | `false` |
+
+> Note: Images over 5MB are skipped. Requires a multi-modal capable model on the agent.
+
+#### Voice Transcription
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_VOICE_TRANSCRIPTION` | Transcribe voice messages using OpenAI | `false` |
+| `OPENAI_API_KEY` | OpenAI API key (required for transcription) | - |
+| `OPENAI_TRANSCRIBE_MODEL` | Transcription model to use | `gpt-4o-mini-transcribe` |
+
+> Note: Requires ffmpeg installed on the system. Voice messages over 25MB are skipped.
+
+#### User-Specific Memory Blocks
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_USER_BLOCKS` | Attach user-specific memory blocks per message | `false` |
+| `USER_BLOCK_LABEL_PREFIX` | Label prefix for user blocks | `/<agent_id>/discord/users/` |
+| `USER_BLOCKS_CLEANUP_INTERVAL_MINUTES` | Cleanup sweep interval for orphaned blocks | `60` |
+
 #### App Configuration
 
 | Variable | Description | Default |
@@ -354,3 +386,31 @@ When enabled, the bot sends periodic heartbeat events to the agent:
 - Only fires based on `FIRING_PROBABILITY` (default 10%)
 - Requires `DISCORD_CHANNEL_ID` to know where to send responses
 - Allows the agent to initiate conversations or update memory autonomously
+
+### Image Handling
+
+When `ENABLE_IMAGE_HANDLING=true`, image attachments in Discord messages are forwarded to the agent:
+
+- Supports PNG, JPEG, GIF, WebP formats
+- Images are base64 encoded and sent as multi-modal content
+- Images over 5MB are skipped
+- Requires a multi-modal capable model on your Letta agent
+
+### Voice Transcription
+
+When `ENABLE_VOICE_TRANSCRIPTION=true`, Discord voice messages are transcribed and sent as text:
+
+- Requires `OPENAI_API_KEY` to be set
+- Requires `ffmpeg` installed on the system (to convert OGG to MP3)
+- Uses `gpt-4o-mini-transcribe` model by default (configurable via `OPENAI_TRANSCRIBE_MODEL`)
+- Voice messages over 25MB are skipped
+- Graceful fallback if ffmpeg is not installed
+
+### User-Specific Memory Blocks
+
+When `ENABLE_USER_BLOCKS=true`, the bot dynamically attaches user-specific memory blocks:
+
+- Creates/attaches a dedicated memory block for each Discord user mentioned in a message
+- Blocks are attached before sending to the agent, detached after response
+- Allows the agent to maintain per-user notes and context
+- Periodic cleanup sweep removes orphaned blocks (configurable interval)
