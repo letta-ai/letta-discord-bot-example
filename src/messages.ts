@@ -36,6 +36,11 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe';
 const VOICE_MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25MB limit for OpenAI
 
+// Per-thread conversations configuration
+const ENABLE_THREAD_CONVERSATIONS = process.env.ENABLE_THREAD_CONVERSATIONS === 'true';
+// Map Discord thread ID -> Letta conversation ID (in-memory, lost on restart)
+const threadConversations = new Map<string, string>();
+
 // Track active message turns to prevent cleanup during processing
 let activeMessageTurns = 0;
 
@@ -493,6 +498,125 @@ async function extractVoiceTranscription(
 
 // ==================== End Voice Transcription ====================
 
+// ==================== Thread Conversations ====================
+
+/**
+ * Parse SSE stream from fetch response body.
+ * Used for raw HTTP calls to the Letta conversations API.
+ */
+async function* parseSSEStream(body: ReadableStream<Uint8Array> | null): AsyncIterable<any> {
+  if (!body) return;
+  
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') return;
+          // Skip ping messages
+          if (data === 'ping') continue;
+          try {
+            yield JSON.parse(data);
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Create a new Letta conversation for the agent.
+ * Includes thread name in conversation name for identification.
+ */
+async function createConversation(threadName?: string): Promise<string> {
+  const name = threadName 
+    ? `Discord Thread: ${threadName} (${new Date().toISOString()})`
+    : `Discord Thread (${new Date().toISOString()})`;
+  
+  const baseUrl = process.env.LETTA_BASE_URL || 'https://api.letta.com';
+  const response = await fetch(
+    `${baseUrl}/v1/conversations?agent_id=${AGENT_ID}`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.LETTA_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    }
+  );
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to create conversation: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
+  return data.id; // "conv-xxx"
+}
+
+/**
+ * Get or create a conversation for a Discord thread.
+ */
+async function getOrCreateThreadConversation(threadId: string, threadName?: string): Promise<string> {
+  if (threadConversations.has(threadId)) {
+    return threadConversations.get(threadId)!;
+  }
+  
+  const conversationId = await createConversation(threadName);
+  threadConversations.set(threadId, conversationId);
+  console.log(`🧵 Created conversation ${conversationId} for thread ${threadId}`);
+  return conversationId;
+}
+
+/**
+ * Send a message to a conversation (streaming).
+ * Returns an async iterable that yields message chunks.
+ */
+async function sendConversationMessage(
+  conversationId: string,
+  message: any
+): Promise<AsyncIterable<any>> {
+  const baseUrl = process.env.LETTA_BASE_URL || 'https://api.letta.com';
+  const response = await fetch(
+    `${baseUrl}/v1/conversations/${conversationId}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.LETTA_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify({ messages: [message] }),
+    }
+  );
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to send conversation message: ${response.status} - ${errorText}`);
+  }
+  
+  // Return SSE stream
+  return parseSSEStream(response.body);
+}
+
+// ==================== End Thread Conversations ====================
+
 // Helper function to split text that doesn't contain code blocks
 function splitText(text: string, limit: number): string[] {
   if (text.length <= limit) {
@@ -766,11 +890,27 @@ async function fetchConversationHistory(
 ): Promise<string> {
   console.log(`📚 CONTEXT_MESSAGE_COUNT: ${CONTEXT_MESSAGE_COUNT}`);
 
-  // If we're in a thread, use thread context instead
+  // If we're in a thread, check if we should use thread context
   const channel = discordMessageObject.channel;
-  if ('isThread' in channel && channel.isThread() && THREAD_CONTEXT_ENABLED) {
-    console.log(`📚 In a thread, using thread context instead of conversation history`);
-    return fetchThreadContext(discordMessageObject);
+  const isInThread = 'isThread' in channel && channel.isThread();
+  
+  if (isInThread) {
+    // If thread conversations are enabled, the Letta conversation maintains its own history
+    // Only fetch Discord thread context for the FIRST message in this session (new conversation)
+    if (ENABLE_THREAD_CONVERSATIONS) {
+      const isNewConversation = !threadConversations.has(channel.id);
+      if (isNewConversation && THREAD_CONTEXT_ENABLED) {
+        console.log(`📚 First message in thread with conversations - fetching Discord thread context`);
+        return fetchThreadContext(discordMessageObject);
+      } else {
+        console.log(`📚 Using thread conversation history (skipping Discord thread context)`);
+        return '';
+      }
+    } else if (THREAD_CONTEXT_ENABLED) {
+      // Thread conversations disabled - always fetch thread context as before
+      console.log(`📚 In a thread, using thread context instead of conversation history`);
+      return fetchThreadContext(discordMessageObject);
+    }
   }
 
   if (CONTEXT_MESSAGE_COUNT <= 0) {
@@ -981,11 +1121,27 @@ async function sendMessage(
   const attachedUserBlockIds = await attachUserBlocks(senderId, message);
 
   try {
+    // Determine if we should use a conversation (thread context)
+    const isInThread = 'isThread' in channel && channel.isThread();
+    const useConversation = ENABLE_THREAD_CONVERSATIONS && isInThread;
+    
     console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
     console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
-    const response = await client.agents.messages.stream(AGENT_ID, {
-      messages: [lettaMessage]
-    });
+    
+    let response;
+    if (useConversation) {
+      // Route thread messages to their own conversation
+      const threadId = channel.id;
+      const threadName = 'name' in channel ? channel.name : undefined;
+      const conversationId = await getOrCreateThreadConversation(threadId, threadName);
+      console.log(`🧵 Using conversation ${conversationId} for thread ${threadId}`);
+      response = await sendConversationMessage(conversationId, lettaMessage);
+    } else {
+      // Use default agent conversation
+      response = await client.agents.messages.stream(AGENT_ID, {
+        messages: [lettaMessage]
+      });
+    }
 
     // Only pass discordMessageObject to processStream if we should respond (to show intermediate messages)
     const agentMessageResponse = response ? await processStream(response, shouldRespond ? discordMessageObject : undefined) : "";
