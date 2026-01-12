@@ -651,8 +651,11 @@ const processStream = async (
       if ('message_type' in chunk) {
         switch (chunk.message_type) {
           case 'assistant_message':
+            console.log('🗣️ Assistant message:', chunk);
             if ('content' in chunk && typeof chunk.content === 'string') {
               await sendAsyncMessage(chunk.content);
+            } else {
+              console.log('⚠️ Assistant message missing content or not a string:', typeof chunk.content, chunk);
             }
             break;
           case 'stop_reason':
