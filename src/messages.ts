@@ -38,8 +38,56 @@ const VOICE_MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25MB limit for OpenAI
 
 // Per-thread conversations configuration
 const ENABLE_THREAD_CONVERSATIONS = process.env.ENABLE_THREAD_CONVERSATIONS === 'true';
-// Map Discord thread ID -> Letta conversation ID (in-memory, lost on restart)
+const THREAD_CONVERSATIONS_FILE = process.env.THREAD_CONVERSATIONS_FILE || './thread-conversations.json';
+// Map Discord thread ID -> Letta conversation ID
 const threadConversations = new Map<string, string>();
+
+/**
+ * Load thread conversations mapping from file.
+ * Gracefully handles missing/invalid file.
+ */
+function loadThreadConversations(): void {
+  try {
+    if (fs.existsSync(THREAD_CONVERSATIONS_FILE)) {
+      const data = fs.readFileSync(THREAD_CONVERSATIONS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (typeof parsed === 'object' && parsed !== null) {
+        Object.entries(parsed).forEach(([threadId, convId]) => {
+          if (typeof convId === 'string') {
+            threadConversations.set(threadId, convId);
+          }
+        });
+        console.log(`🧵 Loaded ${threadConversations.size} thread conversations from ${THREAD_CONVERSATIONS_FILE}`);
+      }
+    } else {
+      console.log(`🧵 No thread conversations file found at ${THREAD_CONVERSATIONS_FILE} (will create on first use)`);
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to load thread conversations from file (using in-memory):`, error);
+  }
+}
+
+/**
+ * Save thread conversations mapping to file.
+ * Gracefully handles write failures.
+ */
+function saveThreadConversations(): void {
+  try {
+    const data: Record<string, string> = {};
+    threadConversations.forEach((convId, threadId) => {
+      data[threadId] = convId;
+    });
+    fs.writeFileSync(THREAD_CONVERSATIONS_FILE, JSON.stringify(data, null, 2));
+    console.log(`🧵 Saved ${threadConversations.size} thread conversations to ${THREAD_CONVERSATIONS_FILE}`);
+  } catch (error) {
+    console.warn(`⚠️ Failed to save thread conversations to file (continuing in-memory):`, error);
+  }
+}
+
+// Load thread conversations on startup
+if (ENABLE_THREAD_CONVERSATIONS) {
+  loadThreadConversations();
+}
 
 // Track active message turns to prevent cleanup during processing
 let activeMessageTurns = 0;
@@ -575,11 +623,14 @@ async function createConversation(threadName?: string): Promise<string> {
  */
 async function getOrCreateThreadConversation(threadId: string, threadName?: string): Promise<string> {
   if (threadConversations.has(threadId)) {
-    return threadConversations.get(threadId)!;
+    const cached = threadConversations.get(threadId)!;
+    console.log(`🧵 Using cached conversation ${cached} for thread ${threadId}`);
+    return cached;
   }
   
   const conversationId = await createConversation(threadName);
   threadConversations.set(threadId, conversationId);
+  saveThreadConversations(); // Persist to file
   console.log(`🧵 Created conversation ${conversationId} for thread ${threadId}`);
   return conversationId;
 }
