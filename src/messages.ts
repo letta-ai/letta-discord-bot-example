@@ -621,18 +621,18 @@ async function createConversation(threadName?: string): Promise<string> {
 /**
  * Get or create a conversation for a Discord thread.
  */
-async function getOrCreateThreadConversation(threadId: string, threadName?: string): Promise<string> {
+async function getOrCreateThreadConversation(threadId: string, threadName?: string): Promise<{ conversationId: string; isNew: boolean }> {
   if (threadConversations.has(threadId)) {
     const cached = threadConversations.get(threadId)!;
     console.log(`🧵 Using cached conversation ${cached} for thread ${threadId}`);
-    return cached;
+    return { conversationId: cached, isNew: false };
   }
   
   const conversationId = await createConversation(threadName);
   threadConversations.set(threadId, conversationId);
   saveThreadConversations(); // Persist to file
   console.log(`🧵 Created conversation ${conversationId} for thread ${threadId}`);
-  return conversationId;
+  return { conversationId, isNew: true };
 }
 
 /**
@@ -1187,8 +1187,23 @@ async function sendMessage(
       // Route thread messages to their own conversation
       const threadId = channel.id;
       const threadName = 'name' in channel ? channel.name : undefined;
-      const conversationId = await getOrCreateThreadConversation(threadId, threadName);
-      console.log(`🧵 Using conversation ${conversationId} for thread ${threadId}`);
+      const { conversationId, isNew } = await getOrCreateThreadConversation(threadId, threadName);
+      console.log(`🧵 Using conversation ${conversationId} for thread ${threadId} (new: ${isNew})`);
+      
+      // Inject context for new conversations
+      if (isNew) {
+        const newConvoContext = `[SYSTEM: A new conversation thread has been created for Discord thread "${threadName || threadId}". This is an isolated conversation - you won't see messages from other threads here, but your memory blocks are shared across all conversations.]\n\n`;
+        if (typeof lettaMessage.content === 'string') {
+          lettaMessage.content = newConvoContext + lettaMessage.content;
+        } else if (Array.isArray(lettaMessage.content)) {
+          // Handle multi-modal content (text + images)
+          const textBlock = lettaMessage.content.find((b: any) => b.type === 'text') as { type: 'text'; text: string } | undefined;
+          if (textBlock) {
+            textBlock.text = newConvoContext + textBlock.text;
+          }
+        }
+      }
+      
       response = await sendConversationMessage(conversationId, lettaMessage);
     } else {
       // Use default agent conversation
