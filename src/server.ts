@@ -27,6 +27,8 @@ const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
 const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
 const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
 const USER_BLOCKS_CLEANUP_INTERVAL_MINUTES = parseInt(process.env.USER_BLOCKS_CLEANUP_INTERVAL_MINUTES || '60', 10);
+const ENABLE_THREAD_CONVERSATIONS = process.env.ENABLE_THREAD_CONVERSATIONS === 'true';
+const THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION = process.env.THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION === 'true';
 
 console.log('⚙️  Configuration:');
 console.log('  - RESPOND_TO_DMS:', RESPOND_TO_DMS);
@@ -446,6 +448,13 @@ client.on('messageCreate', async (message) => {
     } else if (msg !== "" && !canRespond) {
       console.log(`Agent generated response but not responding (not in response channel): ${msg}`);
     }
+    return;
+  }
+
+  // Thread conversations: respond without mention if enabled and in a thread
+  if (ENABLE_THREAD_CONVERSATIONS && THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION && message.channel.isThread()) {
+    console.log(`📩 Received message in thread conversation from ${message.author.username}: ${message.content}`);
+    processAndSendMessage(message, MessageType.GENERIC);
     return;
   }
 
