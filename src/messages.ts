@@ -1179,9 +1179,6 @@ async function sendMessage(
     const isInThread = 'isThread' in channel && channel.isThread();
     const useConversation = ENABLE_THREAD_CONVERSATIONS && isInThread;
     
-    console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
-    console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
-    
     let response;
     if (useConversation) {
       // Route thread messages to their own conversation
@@ -1204,8 +1201,15 @@ async function sendMessage(
         }
       }
       
+      // Log after injection so we see the actual sent content
+      console.log(`🛜 Sending message to Letta conversation ${conversationId} (agent=${AGENT_ID})`);
+      console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
+      
       response = await sendConversationMessage(conversationId, lettaMessage);
     } else {
+      // Log for non-conversation messages
+      console.log(`🛜 Sending message to Letta server (agent=${AGENT_ID})`);
+      console.log(`📝 Full prompt:\n${lettaMessage.content}\n`);
       // Use default agent conversation
       response = await client.agents.messages.stream(AGENT_ID, {
         messages: [lettaMessage]
