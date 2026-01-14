@@ -384,6 +384,35 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
+  // Thread conversations: handle ALL messages in thread uniformly (before mention/reply checks)
+  // This ensures consistent batching behavior for all messages in the same thread
+  if (ENABLE_THREAD_CONVERSATIONS && 
+      THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION && 
+      message.channel.isThread()) {
+    
+    // Still detect message type for appropriate prefix to agent
+    let messageType = MessageType.GENERIC;
+    const isMentionInThread = message.mentions.has(client.user || '');
+    
+    if (isMentionInThread) {
+      messageType = MessageType.MENTION;
+    } else if (message.reference?.messageId) {
+      // Check if replying to bot's message
+      try {
+        const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
+        if (repliedTo.author.id === client.user?.id) {
+          messageType = MessageType.REPLY;
+        }
+      } catch (error) {
+        // Ignore fetch errors, just use GENERIC
+      }
+    }
+    
+    console.log(`📩 Thread conversation (${messageType}) from ${message.author.username}: ${message.content}`);
+    processAndSendMessage(message, messageType);
+    return;
+  }
+
   // Check if the bot is mentioned or if the message is a reply to the bot
   const isMention = message.mentions.has(client.user || '');
   let isReplyToBot = false;
@@ -448,13 +477,6 @@ client.on('messageCreate', async (message) => {
     } else if (msg !== "" && !canRespond) {
       console.log(`Agent generated response but not responding (not in response channel): ${msg}`);
     }
-    return;
-  }
-
-  // Thread conversations: respond without mention if enabled and in a thread
-  if (ENABLE_THREAD_CONVERSATIONS && THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION && message.channel.isThread()) {
-    console.log(`📩 Received message in thread conversation from ${message.author.username}: ${message.content}`);
-    processAndSendMessage(message, MessageType.GENERIC);
     return;
   }
 
