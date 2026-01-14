@@ -229,7 +229,7 @@ async function sendSplitReply(message: OmitPartialGroupDMChannel<Message<boolean
     } else if (message.hasThread && message.thread) {
       thread = message.thread;
     } else {
-      const threadName = message.content.substring(0, 50) || 'Chat';
+      const threadName = message.cleanContent.substring(0, 50) || 'Chat';
       thread = await message.startThread({ name: threadName });
     }
     

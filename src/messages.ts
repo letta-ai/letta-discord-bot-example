@@ -627,7 +627,7 @@ const processStream = async (
                 await createdThread.send(chunk);
               } else {
                 // No thread exists, create one
-                const threadName = discordTarget.content.substring(0, 50) || 'Chat';
+                const threadName = discordTarget.cleanContent.substring(0, 50) || 'Chat';
                 createdThread = await discordTarget.startThread({ name: threadName });
                 await createdThread.send(chunk);
               }
