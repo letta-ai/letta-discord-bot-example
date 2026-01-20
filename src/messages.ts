@@ -39,54 +39,55 @@ const VOICE_MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25MB limit for OpenAI
 // Per-thread conversations configuration
 const ENABLE_THREAD_CONVERSATIONS = process.env.ENABLE_THREAD_CONVERSATIONS === 'true';
 const THREAD_CONVERSATIONS_FILE = process.env.THREAD_CONVERSATIONS_FILE || './thread-conversations.json';
-// Map Discord thread ID -> Letta conversation ID
-const threadConversations = new Map<string, string>();
+// Map Discord channel/thread ID -> Letta conversation ID
+// Works for both threads and regular channels
+const channelConversations = new Map<string, string>();
 
 /**
- * Load thread conversations mapping from file.
+ * Load channel conversations mapping from file.
  * Gracefully handles missing/invalid file.
  */
-function loadThreadConversations(): void {
+function loadChannelConversations(): void {
   try {
     if (fs.existsSync(THREAD_CONVERSATIONS_FILE)) {
       const data = fs.readFileSync(THREAD_CONVERSATIONS_FILE, 'utf-8');
       const parsed = JSON.parse(data);
       if (typeof parsed === 'object' && parsed !== null) {
-        Object.entries(parsed).forEach(([threadId, convId]) => {
+        Object.entries(parsed).forEach(([channelId, convId]) => {
           if (typeof convId === 'string') {
-            threadConversations.set(threadId, convId);
+            channelConversations.set(channelId, convId);
           }
         });
-        console.log(`🧵 Loaded ${threadConversations.size} thread conversations from ${THREAD_CONVERSATIONS_FILE}`);
+        console.log(`🧵 Loaded ${channelConversations.size} channel/thread conversations from ${THREAD_CONVERSATIONS_FILE}`);
       }
     } else {
-      console.log(`🧵 No thread conversations file found at ${THREAD_CONVERSATIONS_FILE} (will create on first use)`);
+      console.log(`🧵 No conversations file found at ${THREAD_CONVERSATIONS_FILE} (will create on first use)`);
     }
   } catch (error) {
-    console.warn(`⚠️ Failed to load thread conversations from file (using in-memory):`, error);
+    console.warn(`⚠️ Failed to load conversations from file (using in-memory):`, error);
   }
 }
 
 /**
- * Save thread conversations mapping to file.
+ * Save channel conversations mapping to file.
  * Gracefully handles write failures.
  */
-function saveThreadConversations(): void {
+function saveChannelConversations(): void {
   try {
     const data: Record<string, string> = {};
-    threadConversations.forEach((convId, threadId) => {
-      data[threadId] = convId;
+    channelConversations.forEach((convId, channelId) => {
+      data[channelId] = convId;
     });
     fs.writeFileSync(THREAD_CONVERSATIONS_FILE, JSON.stringify(data, null, 2));
-    console.log(`🧵 Saved ${threadConversations.size} thread conversations to ${THREAD_CONVERSATIONS_FILE}`);
+    console.log(`🧵 Saved ${channelConversations.size} channel/thread conversations to ${THREAD_CONVERSATIONS_FILE}`);
   } catch (error) {
-    console.warn(`⚠️ Failed to save thread conversations to file (continuing in-memory):`, error);
+    console.warn(`⚠️ Failed to save conversations to file (continuing in-memory):`, error);
   }
 }
 
-// Load thread conversations on startup
+// Load channel conversations on startup
 if (ENABLE_THREAD_CONVERSATIONS) {
-  loadThreadConversations();
+  loadChannelConversations();
 }
 
 // Track active message turns to prevent cleanup during processing
@@ -619,19 +620,19 @@ async function createConversation(threadName?: string): Promise<string> {
 }
 
 /**
- * Get or create a conversation for a Discord thread.
+ * Get or create a conversation for a Discord channel or thread.
  */
-async function getOrCreateThreadConversation(threadId: string, threadName?: string): Promise<{ conversationId: string; isNew: boolean }> {
-  if (threadConversations.has(threadId)) {
-    const cached = threadConversations.get(threadId)!;
-    console.log(`🧵 Using cached conversation ${cached} for thread ${threadId}`);
+async function getOrCreateChannelConversation(channelId: string, channelName?: string): Promise<{ conversationId: string; isNew: boolean }> {
+  if (channelConversations.has(channelId)) {
+    const cached = channelConversations.get(channelId)!;
+    console.log(`🧵 Using cached conversation ${cached} for channel ${channelId}`);
     return { conversationId: cached, isNew: false };
   }
   
-  const conversationId = await createConversation(threadName);
-  threadConversations.set(threadId, conversationId);
-  saveThreadConversations(); // Persist to file
-  console.log(`🧵 Created conversation ${conversationId} for thread ${threadId}`);
+  const conversationId = await createConversation(channelName);
+  channelConversations.set(channelId, conversationId);
+  saveChannelConversations(); // Persist to file
+  console.log(`🧵 Created conversation ${conversationId} for channel ${channelId}`);
   return { conversationId, isNew: true };
 }
 
@@ -944,27 +945,31 @@ async function fetchConversationHistory(
 ): Promise<string> {
   console.log(`📚 CONTEXT_MESSAGE_COUNT: ${CONTEXT_MESSAGE_COUNT}`);
 
-  // If we're in a thread, check if we should use thread context
+  // Check if we should use channel/thread conversations
   const channel = discordMessageObject.channel;
   const isInThread = 'isThread' in channel && channel.isThread();
   
-  if (isInThread) {
-    // If thread conversations are enabled, the Letta conversation maintains its own history
-    // Only fetch Discord thread context for the FIRST message in this session (new conversation)
-    if (ENABLE_THREAD_CONVERSATIONS) {
-      const isNewConversation = !threadConversations.has(channel.id);
-      if (isNewConversation && THREAD_CONTEXT_ENABLED) {
+  // When conversations are enabled, the Letta conversation maintains its own history
+  // Only fetch Discord context for the FIRST message in this session (new conversation)
+  if (ENABLE_THREAD_CONVERSATIONS) {
+    const isNewConversation = !channelConversations.has(channel.id);
+    if (isNewConversation) {
+      if (isInThread && THREAD_CONTEXT_ENABLED) {
         console.log(`📚 First message in thread with conversations - fetching Discord thread context`);
         return fetchThreadContext(discordMessageObject);
       } else {
-        console.log(`📚 Using thread conversation history (skipping Discord thread context)`);
-        return '';
+        console.log(`📚 First message in channel with conversations - fetching Discord channel context`);
+        // For regular channels, fetch recent message history as context for first message
+        // Fall through to normal context fetching below
       }
-    } else if (THREAD_CONTEXT_ENABLED) {
-      // Thread conversations disabled - always fetch thread context as before
-      console.log(`📚 In a thread, using thread context instead of conversation history`);
-      return fetchThreadContext(discordMessageObject);
+    } else {
+      console.log(`📚 Using conversation history (skipping Discord context)`);
+      return '';
     }
+  } else if (isInThread && THREAD_CONTEXT_ENABLED) {
+    // Thread conversations disabled - always fetch thread context as before
+    console.log(`📚 In a thread, using thread context instead of conversation history`);
+    return fetchThreadContext(discordMessageObject);
   }
 
   if (CONTEXT_MESSAGE_COUNT <= 0) {
@@ -1175,21 +1180,22 @@ async function sendMessage(
   const attachedUserBlockIds = await attachUserBlocks(senderId, message);
 
   try {
-    // Determine if we should use a conversation (thread context)
+    // Determine if we should use a conversation (per-channel/thread)
     const isInThread = 'isThread' in channel && channel.isThread();
-    const useConversation = ENABLE_THREAD_CONVERSATIONS && isInThread;
+    const useConversation = ENABLE_THREAD_CONVERSATIONS;
     
     let response;
     if (useConversation) {
-      // Route thread messages to their own conversation
-      const threadId = channel.id;
-      const threadName = 'name' in channel ? channel.name : undefined;
-      const { conversationId, isNew } = await getOrCreateThreadConversation(threadId, threadName);
-      console.log(`🧵 Using conversation ${conversationId} for thread ${threadId} (new: ${isNew})`);
+      // Route messages to their channel/thread-specific conversation
+      const channelId = channel.id;
+      const channelName = 'name' in channel ? channel.name : undefined;
+      const { conversationId, isNew } = await getOrCreateChannelConversation(channelId, channelName);
+      console.log(`🧵 Using conversation ${conversationId} for ${isInThread ? 'thread' : 'channel'} ${channelId} (new: ${isNew})`);
       
       // Inject context for new conversations
       if (isNew) {
-        const newConvoContext = `[SYSTEM: A new conversation thread has been created for Discord thread "${threadName || threadId}". This is an isolated conversation - you won't see messages from other threads here, but your memory blocks are shared across all conversations.]\n\n`;
+        const contextType = isInThread ? 'thread' : 'channel';
+        const newConvoContext = `[SYSTEM: A new conversation has been created for Discord ${contextType} "${channelName || channelId}". This is an isolated conversation - you won't see messages from other ${contextType}s here, but your memory blocks are shared across all conversations.]\n\n`;
         if (typeof lettaMessage.content === 'string') {
           lettaMessage.content = newConvoContext + lettaMessage.content;
         } else if (Array.isArray(lettaMessage.content)) {
