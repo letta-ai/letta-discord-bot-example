@@ -27,6 +27,8 @@ const MESSAGE_BATCH_SIZE = parseInt(process.env.MESSAGE_BATCH_SIZE || '10', 10);
 const MESSAGE_BATCH_TIMEOUT_MS = parseInt(process.env.MESSAGE_BATCH_TIMEOUT_MS || '30000', 10);
 const REPLY_IN_THREADS = process.env.REPLY_IN_THREADS === 'true';
 const USER_BLOCKS_CLEANUP_INTERVAL_MINUTES = parseInt(process.env.USER_BLOCKS_CLEANUP_INTERVAL_MINUTES || '60', 10);
+const ENABLE_THREAD_CONVERSATIONS = process.env.ENABLE_THREAD_CONVERSATIONS === 'true';
+const THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION = process.env.THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION === 'true';
 
 console.log('⚙️  Configuration:');
 console.log('  - RESPOND_TO_DMS:', RESPOND_TO_DMS);
@@ -379,6 +381,35 @@ client.on('messageCreate', async (message) => {
     } else {
       console.log(`📩 Ignoring DM...`);
     }
+    return;
+  }
+
+  // Thread conversations: handle ALL messages in thread uniformly (before mention/reply checks)
+  // This ensures consistent batching behavior for all messages in the same thread
+  if (ENABLE_THREAD_CONVERSATIONS && 
+      THREAD_CONVERSATIONS_RESPOND_WITHOUT_MENTION && 
+      message.channel.isThread()) {
+    
+    // Still detect message type for appropriate prefix to agent
+    let messageType = MessageType.GENERIC;
+    const isMentionInThread = message.mentions.has(client.user || '');
+    
+    if (isMentionInThread) {
+      messageType = MessageType.MENTION;
+    } else if (message.reference?.messageId) {
+      // Check if replying to bot's message
+      try {
+        const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
+        if (repliedTo.author.id === client.user?.id) {
+          messageType = MessageType.REPLY;
+        }
+      } catch (error) {
+        // Ignore fetch errors, just use GENERIC
+      }
+    }
+    
+    console.log(`📩 Thread conversation (${messageType}) from ${message.author.username}: ${message.content}`);
+    processAndSendMessage(message, messageType);
     return;
   }
 
