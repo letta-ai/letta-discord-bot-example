@@ -163,7 +163,7 @@ describe("bridge", () => {
     const expected = join(dir, "m1-Luna_clip.mp4");
     expect(readFileSync(expected, "utf8")).toBe("abc");
     expect(String(calls.sends[0])).toContain(`path="${expected}"`);
-    expect(String(calls.sends[0])).not.toContain("https://cdn/x.mp4");
+    expect(String(calls.sends[0])).toContain(`url="https://cdn/x.mp4"`);
     expect(c.events.some((e) => e.kind === "files_uploaded")).toBe(true);
   });
 

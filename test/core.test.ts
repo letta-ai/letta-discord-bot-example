@@ -73,7 +73,7 @@ describe("envelope", () => {
     expect(escapeXml(`<&>"`)).toBe("&lt;&amp;&gt;&quot;");
   });
 
-  test("batches messages and lists attachments by path, falling back to url", () => {
+  test("batches messages and lists attachments by path, always keeping the CDN url", () => {
     const xml = buildEnvelopeText(
       [msg(), msg({ messageId: "m2", text: "second", replyToMessageId: "m1" })],
       [
@@ -84,8 +84,10 @@ describe("envelope", () => {
     expect(xml.match(/<message /g)?.length).toBe(2);
     expect(xml).toContain('reply_to="m1"');
     expect(xml).toContain('path="/root/downloads/m1-a.csv"');
-    expect(xml).not.toContain('url="https://cdn/a"');
+    expect(xml).toContain('path="/root/downloads/m1-a.csv"');
+    expect(xml).toContain('url="https://cdn/a"');
     expect(xml).toContain('url="https://cdn/b"');
+    expect(xml).toContain("re-download");
   });
 
   test("buildSendMessage is a string without images and multimodal with them", () => {
