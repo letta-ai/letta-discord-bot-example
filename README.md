@@ -173,9 +173,9 @@ failed transcription never drops the message; the attachment carries `transcript
 
 | Provider | Default model | Notes |
 | --- | --- | --- |
-| `groq` | `whisper-large-v3-turbo` | Fast Whisper. Accepts Discord's Ogg/Opus directly. |
+| `groq` | `whisper-large-v3-turbo` | Fastest in testing, about 0.4 seconds for a 19-second clip. Accepts Ogg/Opus. |
 | `deepgram` | `nova-3` | Accepts Ogg/Opus directly; detects language unless `TRANSCRIBE_LANGUAGE` is set. |
-| `openai` | `gpt-4o-mini-transcribe` | Also `gpt-4o-transcribe`, `whisper-1`. OpenAI's docs disagree on Ogg support, so prefer Groq or Deepgram for voice messages. |
+| `openai` | `gpt-4o-mini-transcribe` | Also `gpt-4o-transcribe`, `whisper-1`. All three accept Ogg/Opus. In testing it was the most accurate on product names, at about 2 seconds for a 19-second clip. |
 | `elevenlabs` | `scribe_v2` | |
 | `assemblyai` | `universal-3-5-pro` | Upload and poll; slower for short clips. |
 | `mistral` | `voxtral-mini-latest` | |
