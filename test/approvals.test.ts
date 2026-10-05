@@ -26,6 +26,16 @@ const request = (requesterId = "requester"): ApprovalRequest => ({
   toolCallId: "tc",
 });
 
+/** All human-visible text in a payload: content plus embed title/description/fields/footer. */
+function text(p: ApprovalPayload): string {
+  const parts = [p.content ?? ""];
+  for (const e of p.embeds ?? []) {
+    parts.push(e.title ?? "", e.description ?? "", e.footer?.text ?? "");
+    for (const f of e.fields ?? []) parts.push(f.name, f.value);
+  }
+  return parts.join("\n");
+}
+
 class FakeMessage implements ApprovalMessage {
   edits: ApprovalPayload[] = [];
   constructor(public payload: ApprovalPayload) {}
@@ -82,6 +92,29 @@ describe("ApprovalManager", () => {
     expect(channel.sent).toHaveLength(0);
   });
 
+  test("renders a readable embed: description as title, command as a bash block, other args as fields", async () => {
+    const channel = new FakeChannel();
+    const manager = new ApprovalManager({ config: config({ APPROVAL_TIMEOUT_SECONDS: 300 }) });
+    void manager.request(
+      channel,
+      {
+        ...request(),
+        toolInput: { command: "cd /tmp/vid && ffmpeg -i luna.mp4 mid.png", description: "Extract a downscaled middle frame", timeout: 60000 },
+      },
+      () => false,
+    );
+    await Promise.resolve();
+    const payload = channel.sent[0]!.payload;
+    const embed = payload.embeds![0]!;
+    expect(embed.title).toBe("Extract a downscaled middle frame");
+    expect(embed.description).toContain("```bash\ncd /tmp/vid && ffmpeg -i luna.mp4 mid.png\n```");
+    expect(text(payload)).not.toContain('"command"');
+    expect(embed.fields).toEqual([{ name: "timeout", value: "`60000`", inline: true }]);
+    expect(embed.footer!.text).toContain("Bash");
+    expect(embed.footer!.text).toContain("5 min");
+    expect(embed.color).toBe(0x5865f2);
+  });
+
   test("enforces admin policy and disables buttons after approval", async () => {
     const channel = new FakeChannel();
     const manager = new ApprovalManager({ config: config() });
@@ -89,8 +122,8 @@ describe("ApprovalManager", () => {
     await Promise.resolve();
 
     expect(channel.sent).toHaveLength(1);
-    expect(channel.sent[0]!.payload.content).toContain("Bash");
-    expect(channel.sent[0]!.payload.content).not.toContain("```unsafe```");
+    expect(text(channel.sent[0]!.payload)).toContain("Bash");
+    expect(text(channel.sent[0]!.payload)).not.toContain("```unsafe```");
 
     const forbidden = new FakeInteraction(customId(channel, "approve"), { id: "requester" });
     expect(await manager.handleInteraction(forbidden)).toBe(true);
@@ -99,7 +132,7 @@ describe("ApprovalManager", () => {
     const approved = new FakeInteraction(customId(channel, "approve"), { id: "admin" });
     expect(await manager.handleInteraction(approved)).toBe(true);
     expect(await decision).toEqual({ allow: true, decidedBy: "admin" });
-    expect(approved.updates[0]!.content).toContain("Approved by <@admin>");
+    expect(text(approved.updates[0]!)).toContain("Approved by <@admin>");
     expect(approved.updates[0]!.components[0]!.components.every((b) => b.disabled)).toBe(true);
   });
 
@@ -111,7 +144,7 @@ describe("ApprovalManager", () => {
     const denied = new FakeInteraction(customId(requesterChannel, "deny"), { id: "u1" });
     await requesterManager.handleInteraction(denied);
     expect((await requesterDecision).allow).toBe(false);
-    expect(denied.updates[0]!.content).toContain("Denied by <@u1>");
+    expect(text(denied.updates[0]!)).toContain("Denied by <@u1>");
 
     const timeoutChannel = new FakeChannel();
     const timeoutManager = new ApprovalManager({
@@ -120,7 +153,7 @@ describe("ApprovalManager", () => {
     const timed = timeoutManager.request(timeoutChannel, request(), () => false);
     const result = await timed;
     expect(result).toEqual({ allow: false, message: "Approval timed out" });
-    expect(timeoutChannel.sent[0]!.edits.at(-1)!.content).toContain("Approval timed out");
+    expect(text(timeoutChannel.sent[0]!.edits.at(-1)!)).toContain("Approval timed out");
   });
 
   test("cancelAll denies all pending requests", async () => {
@@ -130,7 +163,7 @@ describe("ApprovalManager", () => {
     await Promise.resolve();
     await manager.cancelAll();
     expect((await pending).allow).toBe(false);
-    expect(channel.sent[0]!.edits.at(-1)!.content).toContain("Approval cancelled");
+    expect(text(channel.sent[0]!.edits.at(-1)!)).toContain("Approval cancelled");
   });
 
   test("preview is compact and neutralizes backticks", () => {

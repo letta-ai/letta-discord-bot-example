@@ -27,8 +27,18 @@ export interface ApprovalComponentRow {
   }[];
 }
 
+/** Raw Discord API embed JSON (subset). */
+export interface ApprovalEmbed {
+  title?: string;
+  description?: string;
+  color?: number;
+  fields?: { name: string; value: string; inline?: boolean }[];
+  footer?: { text: string };
+}
+
 export interface ApprovalPayload {
   content: string;
+  embeds?: ApprovalEmbed[];
   components: ApprovalComponentRow[];
   allowedMentions: { parse: readonly MentionType[] };
 }
@@ -57,10 +67,11 @@ interface Pending {
   id: string;
   req: ApprovalRequest;
   isAdmin: IsAdmin;
-  baseContent: string;
+  timeoutSeconds: number;
+  mode: "admins" | "requester";
   message: ApprovalMessage | null;
   timer: ReturnType<typeof setTimeout> | null;
-  terminalContent?: string;
+  terminal?: Verdict;
   resolve: (d: ApprovalDecision) => void;
 }
 
@@ -84,10 +95,10 @@ export class ApprovalManager {
     }
 
     const id = randomUUID().replace(/-/g, "").slice(0, 16);
-    const baseContent = renderRequest(req, mode, this.config.APPROVAL_TIMEOUT_SECONDS);
+    const timeoutSeconds = this.config.APPROVAL_TIMEOUT_SECONDS;
 
     return new Promise<ApprovalDecision>((resolve) => {
-      const p: Pending = { id, req, isAdmin, baseContent, message: null, timer: null, resolve };
+      const p: Pending = { id, req, isAdmin, timeoutSeconds, mode, message: null, timer: null, resolve };
       this.pending.set(id, p);
 
       const timeoutMs = Math.max(0, this.config.APPROVAL_TIMEOUT_SECONDS * 1000);
@@ -95,16 +106,14 @@ export class ApprovalManager {
       (p.timer as { unref?: () => void }).unref?.();
 
       channel
-        .send({ content: baseContent, components: buttons(id, false), allowedMentions: NO_MENTIONS })
+        .send(payload(p, null, false))
         .then((msg) => {
           if (this.pending.has(id)) {
             p.message = msg;
           } else {
             // Settled (timeout/cancel) before the send returned: preserve the
             // terminal explanation while disabling the now-stale controls.
-            msg
-              .edit({ content: p.terminalContent ?? baseContent, components: buttons(id, true), allowedMentions: NO_MENTIONS })
-              .catch(() => {});
+            msg.edit(payload(p, p.terminal ?? null, true)).catch(() => {});
           }
         })
         .catch((err) => {
@@ -132,17 +141,13 @@ export class ApprovalManager {
         await interaction.reply({ content: "You can't approve this.", flags: EPHEMERAL, allowedMentions: NO_MENTIONS });
         return true;
       }
-      const verdict = allow ? `Approved by <@${userId}>` : `Denied by <@${userId}>`;
+      const verdict: Verdict = allow ? { kind: "approved", by: userId } : { kind: "denied", by: userId };
       this.settle(id, {
         allow,
         decidedBy: userId,
         ...(allow ? {} : { message: `A Discord approver denied ${p.req.toolName}.` }),
       });
-      await interaction.update({
-        content: `${p.baseContent}\n**${verdict}**`,
-        components: buttons(id, true),
-        allowedMentions: NO_MENTIONS,
-      });
+      await interaction.update(payload(p, verdict, true));
     } catch (err) {
       log.warn("approval interaction failed", { err: String(err) });
     }
@@ -154,11 +159,9 @@ export class ApprovalManager {
     const all = [...this.pending.values()];
     await Promise.all(
       all.map(async (p) => {
-        p.terminalContent = `${p.baseContent}\n**Approval cancelled**`;
+        p.terminal = { kind: "cancelled" };
         this.settle(p.id, { allow: false, message });
-        await p.message
-          ?.edit({ content: p.terminalContent, components: buttons(p.id, true), allowedMentions: NO_MENTIONS })
-          .catch(() => {});
+        await p.message?.edit(payload(p, p.terminal, true)).catch(() => {});
       }),
     );
   }
@@ -185,11 +188,11 @@ export class ApprovalManager {
   private async timeout(id: string): Promise<void> {
     const pending = this.pending.get(id);
     if (!pending) return;
-    pending.terminalContent = `${pending.baseContent}\n**Approval timed out**`;
+    pending.terminal = { kind: "timed_out" };
     const p = this.settle(id, { allow: false, message: "Approval timed out" });
     if (!p?.message) return;
     await p.message
-      .edit({ content: p.terminalContent!, components: buttons(id, true), allowedMentions: NO_MENTIONS })
+      .edit(payload(p, p.terminal!, true))
       .catch((err) => log.debug("approval timeout edit failed", { err: String(err) }));
   }
 }
@@ -234,17 +237,97 @@ export function previewInput(input: Record<string, unknown>, max = PREVIEW_MAX):
   return json;
 }
 
-function renderRequest(req: ApprovalRequest, mode: "admins" | "requester", timeoutSeconds: number): string {
-  const tool = neutralize(req.toolName).slice(0, 100);
+type Verdict =
+  | { kind: "approved"; by: string }
+  | { kind: "denied"; by: string }
+  | { kind: "timed_out" }
+  | { kind: "cancelled" };
+
+const COLORS = { pending: 0x5865f2, approved: 0x57f287, denied: 0xed4245, closed: 0x99aab5 } as const;
+const CODE_KEYS = ["command", "cmd", "script", "code"] as const;
+const MAX_FIELDS = 6;
+
+function payload(p: Pending, verdict: Verdict | null, disabled: boolean): ApprovalPayload {
+  return {
+    content: "",
+    embeds: [renderEmbed(p.req, p.mode, p.timeoutSeconds, verdict)],
+    components: buttons(p.id, disabled),
+    allowedMentions: NO_MENTIONS,
+  };
+}
+
+/** Code-block language for a tool's main code argument. */
+function codeLang(toolName: string, key: string): string {
+  if (/bash|shell|terminal|exec/i.test(toolName) || key === "command" || key === "cmd") return "bash";
+  if (/python/i.test(toolName)) return "py";
+  return "";
+}
+
+function fieldValue(v: unknown): string {
+  let raw: string;
+  if (typeof v === "string") raw = v;
+  else {
+    try {
+      raw = JSON.stringify(v) ?? String(v);
+    } catch {
+      raw = "[unserializable]";
+    }
+  }
+  raw = neutralize(raw.replace(/\s+/g, " ").trim());
+  if (raw.length > 200) raw = `${raw.slice(0, 199)}…`;
+  return raw ? `\`${raw}\`` : "`(empty)`";
+}
+
+/**
+ * Approval card: the call's description is the title, the main code argument
+ * (e.g. Bash `command`) is a highlighted code block, remaining arguments are
+ * compact fields, and tool + policy live in the footer.
+ */
+export function renderEmbed(
+  req: ApprovalRequest,
+  mode: "admins" | "requester",
+  timeoutSeconds: number,
+  verdict: Verdict | null,
+): ApprovalEmbed {
+  const input = req.toolInput ?? {};
+  const tool = req.toolName.slice(0, 100);
+  const desc = typeof input.description === "string" ? input.description.trim() : "";
+  const codeKey = CODE_KEYS.find((k) => typeof input[k] === "string");
+
+  const lines: string[] = [];
+  if (codeKey) {
+    let code = neutralize(String(input[codeKey]));
+    if (code.length > PREVIEW_MAX * 2) code = `${code.slice(0, PREVIEW_MAX * 2 - 1)}…`;
+    lines.push(`\`\`\`${codeLang(tool, codeKey)}\n${code}\n\`\`\``);
+  }
+  const rest = Object.entries(input).filter(([k]) => k !== codeKey && k !== "description");
+  const fields = rest.slice(0, MAX_FIELDS).map(([k, v]) => ({ name: k.slice(0, 256), value: fieldValue(v), inline: true }));
+  if (rest.length > MAX_FIELDS) lines.push(`-# +${rest.length - MAX_FIELDS} more argument(s)`);
+
   const who = mode === "admins" ? "An admin" : `<@${req.requesterId}> or an admin`;
-  const timeout = timeoutSeconds > 0 ? ` Times out in ${formatDuration(timeoutSeconds)}.` : "";
-  return [
-    `**Approval needed:** the agent wants to run \`${tool}\``,
-    "```json",
-    previewInput(req.toolInput),
-    "```",
-    `-# ${who} can approve or deny.${timeout}`,
-  ].join("\n");
+  let color: number = COLORS.pending;
+  if (!verdict) {
+    lines.push(`${who} can approve or deny.`);
+  } else if (verdict.kind === "approved") {
+    color = COLORS.approved;
+    lines.push(`**Approved by <@${verdict.by}>**`);
+  } else if (verdict.kind === "denied") {
+    color = COLORS.denied;
+    lines.push(`**Denied by <@${verdict.by}>**`);
+  } else {
+    color = COLORS.closed;
+    lines.push(verdict.kind === "timed_out" ? "**Approval timed out**" : "**Approval cancelled**");
+  }
+
+  const timeout = !verdict && timeoutSeconds > 0 ? ` · times out in ${formatDuration(timeoutSeconds)}` : "";
+  const title = desc || `Run ${tool}`;
+  return {
+    title: title.length > 256 ? `${title.slice(0, 255)}…` : title,
+    description: lines.join("\n\n").slice(0, 4000),
+    color,
+    ...(fields.length ? { fields } : {}),
+    footer: { text: `Approval needed · ${tool}${timeout}` },
+  };
 }
 
 function formatDuration(s: number): string {
