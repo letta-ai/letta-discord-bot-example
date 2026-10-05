@@ -233,9 +233,21 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
           contentType: f.contentType,
           size: f.size,
         };
-        if (sandbox && f.data) {
+        const safeName = `${m.messageId}-${f.name.replace(/[^\w.\-]+/g, "_")}`;
+        if (!sandbox && f.data && config.LOCAL_ATTACHMENT_DIR) {
           try {
-            const safeName = `${m.messageId}-${f.name.replace(/[^\w.\-]+/g, "_")}`;
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { join, resolve } = await import("node:path");
+            const dir = resolve(config.LOCAL_ATTACHMENT_DIR);
+            await mkdir(dir, { recursive: true });
+            const dest = join(dir, safeName);
+            await writeFile(dest, new Uint8Array(await f.data.arrayBuffer()));
+            base.path = dest;
+          } catch (err) {
+            log.warn("local attachment save failed; falling back to url", { route: s.key, file: f.name, err: String(err) });
+          }
+        } else if (sandbox && f.data) {
+          try {
             const res = await sandbox.uploadFiles([{ name: safeName, data: f.data }]);
             const uploaded = res.files[0];
             if (uploaded) base.path = uploaded.path;

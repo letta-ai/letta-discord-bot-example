@@ -64,6 +64,9 @@ export const ConfigSchema = z.object({
   DEBOUNCE_MS: int(1500),
   MAX_IMAGE_BYTES: int(5 * 1024 * 1024),
   MAX_FILE_BYTES: int(25 * 1024 * 1024),
+  // When turns run on a named computer that shares this filesystem (no managed
+  // sandbox), save attachments here and hand the agent the local path.
+  LOCAL_ATTACHMENT_DIR: z.string().optional(),
 
   // Runtime
   DATA_DIR: z.string().default("./data"),

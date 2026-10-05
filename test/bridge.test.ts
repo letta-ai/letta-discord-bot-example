@@ -31,7 +31,7 @@ function inbound(id: string, text: string, files: InboundMessage["files"] = []):
 
 type Script = (sent: unknown, n: number) => SDKMessage[] | Error;
 
-function fakeClient(script: Script, opts: { failReadyOnce?: boolean } = {}) {
+function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean } = {}) {
   const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any };
   let readyFails = opts.failReadyOnce ? 1 : 0;
   const client: LettaClientLike = {
@@ -47,7 +47,7 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean } = {}) {
       let queue: SDKMessage[] = [];
       let release: (() => void) | null = null;
       const session = {
-        sandbox: {
+        sandbox: opts.noSandbox ? undefined : {
           async uploadFiles(files: { name: string }[]) {
             calls.uploads.push(...files.map((f) => f.name));
             return { files: files.map((f) => ({ path: `/root/downloads/${f.name}`, name: f.name, mimeType: "x", size: 1 })) };
@@ -140,6 +140,30 @@ describe("bridge", () => {
     await bridge.submit([inbound("m1", "see file", [file])], c.ctx);
     expect(calls.uploads).toEqual(["m1-data.csv"]);
     expect(String(calls.sends[0])).toContain('path="/root/downloads/m1-data.csv"');
+    expect(c.events.some((e) => e.kind === "files_uploaded")).toBe(true);
+  });
+
+  test("without a managed sandbox, writes files to LOCAL_ATTACHMENT_DIR and references local paths", async () => {
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "ldl-att-"));
+    const localConfig = loadConfig({
+      DISCORD_BOT_TOKEN: "x",
+      LETTA_API_KEY: "y",
+      LETTA_AGENT_ID: "agent-123",
+      SESSION_IDLE_MINUTES: "0",
+      LOCAL_ATTACHMENT_DIR: dir,
+    });
+    const { client, calls } = fakeClient(() => ok("got it"), { noSandbox: true });
+    const bridge = createAgentBridge(localConfig, { client, store: new RouteStore(":memory:") });
+    const c = ctxCollector();
+    const file = { name: "Luna clip.mp4", url: "https://cdn/x.mp4", contentType: "video/mp4", size: 3, data: new Blob(["abc"]) };
+    await bridge.submit([inbound("m1", "see video", [file])], c.ctx);
+    const expected = join(dir, "m1-Luna_clip.mp4");
+    expect(readFileSync(expected, "utf8")).toBe("abc");
+    expect(String(calls.sends[0])).toContain(`path="${expected}"`);
+    expect(String(calls.sends[0])).not.toContain("https://cdn/x.mp4");
     expect(c.events.some((e) => e.kind === "files_uploaded")).toBe(true);
   });
 
