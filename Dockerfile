@@ -1,6 +1,11 @@
 # Dependencies are resolved with npm (package-lock.json): bun 1.3.14's resolver
 # segfaults on this dependency graph. Bun is still the runtime.
 FROM node:22-slim AS deps
+# node-pty (a dependency of @letta-ai/letta-code) ships no linux prebuilds, so
+# node-gyp compiles it here. The toolchain stays in this discarded stage.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
