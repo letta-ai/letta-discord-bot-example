@@ -3,6 +3,10 @@
 A small Bun + TypeScript process that connects one Discord bot to one Letta agent through the
 Letta Agent SDK (`backend: "cloud"`).
 
+Looking for the previous Express bot (message batching, timer heartbeats, per-user memory blocks)?
+It is preserved unchanged on the [`legacy`](https://github.com/letta-ai/letta-discord-bot-example/tree/legacy)
+branch.
+
 ## What it is
 
 This is a listener you run yourself, the alternative to letting Letta run Letta Code Channels:
@@ -234,3 +238,7 @@ explains why Modal is a poor fit.
 ## Layout
 
 See `ARCHITECTURE.md` for module ownership and the full behavior spec.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
