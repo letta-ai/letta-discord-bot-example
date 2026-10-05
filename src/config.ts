@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRANSCRIBE_PROVIDERS } from "./transcribe/index.ts";
 
 const csv = z
   .string()
@@ -68,11 +69,27 @@ export const ConfigSchema = z.object({
   // sandbox), save attachments here and hand the agent the local path.
   LOCAL_ATTACHMENT_DIR: z.string().optional(),
 
+  // Voice/audio transcription (off unless a provider is set)
+  TRANSCRIBE_PROVIDER: z.enum(["none", ...TRANSCRIBE_PROVIDERS]).default("none"),
+  TRANSCRIBE_API_KEY: z.string().optional(),
+  TRANSCRIBE_MODEL: z.string().optional(),
+  TRANSCRIBE_BASE_URL: z.string().url().optional(),
+  TRANSCRIBE_LANGUAGE: z.string().optional(),
+  TRANSCRIBE_TIMEOUT_SECONDS: int(60),
+
   // Runtime
   DATA_DIR: z.string().default("./data"),
   HEALTH_PORT: int(8080),
   SESSION_IDLE_MINUTES: int(15),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+}).superRefine((c, ctx) => {
+  const p = c.TRANSCRIBE_PROVIDER;
+  if (p !== "none" && p !== "openai-compatible" && !c.TRANSCRIBE_API_KEY) {
+    ctx.addIssue({ code: "custom", path: ["TRANSCRIBE_API_KEY"], message: `required when TRANSCRIBE_PROVIDER=${p}` });
+  }
+  if (p === "openai-compatible" && !c.TRANSCRIBE_BASE_URL) {
+    ctx.addIssue({ code: "custom", path: ["TRANSCRIBE_BASE_URL"], message: "required when TRANSCRIBE_PROVIDER=openai-compatible" });
+  }
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

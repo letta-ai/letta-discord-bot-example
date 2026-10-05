@@ -139,6 +139,7 @@ describe("bridge", () => {
     const file = { name: "data.csv", url: "https://cdn/x", contentType: "text/csv", size: 3, data: new Blob(["a,b"]) };
     await bridge.submit([inbound("m1", "see file", [file])], c.ctx);
     expect(calls.uploads).toEqual(["m1-data.csv"]);
+    expect(String(calls.sends[0])).not.toContain("<transcript>");
     expect(String(calls.sends[0])).toContain('path="/root/downloads/m1-data.csv"');
     expect(c.events.some((e) => e.kind === "files_uploaded")).toBe(true);
   });
@@ -165,6 +166,15 @@ describe("bridge", () => {
     expect(String(calls.sends[0])).toContain(`path="${expected}"`);
     expect(String(calls.sends[0])).toContain(`url="https://cdn/x.mp4"`);
     expect(c.events.some((e) => e.kind === "files_uploaded")).toBe(true);
+  });
+
+  test("passes voice transcripts through to the envelope", async () => {
+    const { client, calls } = fakeClient(() => ok("heard you"));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const file = { name: "voice-message.ogg", url: "https://cdn/v", contentType: "audio/ogg", size: 3, data: new Blob(["ogg"]), voice: true, durationSecs: 2, transcript: "deploy the thing" };
+    await bridge.submit([inbound("m1", "", [file])], ctxCollector().ctx);
+    expect(String(calls.sends[0])).toContain('voice="true"');
+    expect(String(calls.sends[0])).toContain("<transcript>deploy the thing</transcript>");
   });
 
   test("retries once after a session failure before any text", async () => {

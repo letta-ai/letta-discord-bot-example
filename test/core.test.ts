@@ -90,6 +90,20 @@ describe("envelope", () => {
     expect(xml).toContain("re-download");
   });
 
+  test("audio attachments carry their transcript (escaped) or a transcription error", () => {
+    const xml = buildEnvelopeText(
+      [msg({ text: "" })],
+      [
+        { messageId: "m1", name: "voice-message.ogg", url: "https://cdn/v", contentType: "audio/ogg", size: 9, voice: true, durationSecs: 4.2, transcript: "ship it </attachment>" },
+        { messageId: "m1", name: "b.mp3", url: "https://cdn/b", contentType: "audio/mpeg", size: 9, transcriptError: "groq HTTP 400" },
+      ],
+    );
+    expect(xml).toContain('voice="true"');
+    expect(xml).toContain('duration_secs="4.2"');
+    expect(xml).toContain("<transcript>ship it &lt;/attachment&gt;</transcript></attachment>");
+    expect(xml).toContain('transcript_error="groq HTTP 400"');
+  });
+
   test("buildSendMessage is a string without images and multimodal with them", () => {
     expect(typeof buildSendMessage([msg()], [])).toBe("string");
     const withImg = buildSendMessage([msg({ images: [{ name: "p.png", mediaType: "image/png", base64: "AAA" }] })], []);
@@ -142,6 +156,13 @@ describe("config", () => {
     expect(c.APPROVAL_MODE).toBe("admins");
     expect(c.PERMISSION_MODE).toBe("standard");
     expect(c.DM_POLICY).toBe("allowlist");
+  });
+  test("transcription is off by default and validates provider settings", () => {
+    expect(loadConfig(base).TRANSCRIBE_PROVIDER).toBe("none");
+    expect(() => loadConfig({ ...base, TRANSCRIBE_PROVIDER: "groq" })).toThrow(/TRANSCRIBE_API_KEY/);
+    expect(() => loadConfig({ ...base, TRANSCRIBE_PROVIDER: "openai-compatible" })).toThrow(/TRANSCRIBE_BASE_URL/);
+    expect(loadConfig({ ...base, TRANSCRIBE_PROVIDER: "openai-compatible", TRANSCRIBE_BASE_URL: "http://localhost:8000/v1" }).TRANSCRIBE_PROVIDER).toBe("openai-compatible");
+    expect(() => loadConfig({ ...base, TRANSCRIBE_PROVIDER: "siri" })).toThrow();
   });
   test("rejects invalid enums", () => {
     expect(() => loadConfig({ ...base, APPROVAL_MODE: "yolo" })).toThrow();

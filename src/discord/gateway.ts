@@ -14,7 +14,21 @@ import { log } from "../log.ts";
 import { routeKeyString, type AgentBridge, type InboundMessage, type RouteKey, type TurnContext } from "../types.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { handleCommand, registerSlashCommands } from "./commands.ts";
+import { createTranscriber, type Transcriber } from "../transcribe/index.ts";
 import { Debouncer, Deduper, gate, isAdminUser, normalize, threadName, type IngressMessage } from "./ingress.ts";
+
+/** Build the configured speech-to-text client, or undefined when disabled. */
+export function transcriberFromConfig(config: Config): Transcriber | undefined {
+  if (config.TRANSCRIBE_PROVIDER === "none") return undefined;
+  return createTranscriber({
+    provider: config.TRANSCRIBE_PROVIDER,
+    apiKey: config.TRANSCRIBE_API_KEY,
+    model: config.TRANSCRIBE_MODEL,
+    baseUrl: config.TRANSCRIBE_BASE_URL,
+    language: config.TRANSCRIBE_LANGUAGE,
+    timeoutMs: config.TRANSCRIBE_TIMEOUT_SECONDS * 1000,
+  });
+}
 import { TurnRenderer } from "./renderer.ts";
 
 export interface DiscordRuntime {
@@ -50,6 +64,8 @@ export async function startDiscord(
   client: Client = createDiscordClient(),
 ): Promise<DiscordRuntime> {
   const approvals = new ApprovalManager({ config });
+  const transcriber = transcriberFromConfig(config);
+  if (transcriber) log.info("voice transcription enabled", { provider: transcriber.provider, model: transcriber.model });
   const dedupe = new Deduper();
   let isReady = false;
   let stopping = false;
@@ -126,7 +142,7 @@ export async function startDiscord(
       }
     }
 
-    const inbound = await normalize(config, message as unknown as IngressMessage, route, client.user.id);
+    const inbound = await normalize(config, message as unknown as IngressMessage, route, client.user.id, undefined, transcriber);
     if (!inbound.text && inbound.images.length === 0 && inbound.files.length === 0) return;
     const key = routeKeyString(route);
     routeOf.set(key, route);

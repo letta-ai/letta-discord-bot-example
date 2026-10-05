@@ -1,6 +1,14 @@
 import type { Config } from "../config.ts";
 import { log } from "../log.ts";
+import { isAudioContentType, type TranscribeInput } from "../transcribe/index.ts";
 import type { InboundFile, InboundImage, InboundMessage, RouteKey } from "../types.ts";
+
+const VOICE_MESSAGE_FLAG = 1 << 13; // MessageFlags.IsVoiceMessage
+
+/** Anything that can turn audio into text (see src/transcribe). */
+export interface TranscriberLike {
+  transcribe(input: TranscribeInput): Promise<{ text: string }>;
+}
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
@@ -21,7 +29,10 @@ export interface IngressMessage {
   };
   reference?: { messageId?: string } | null;
   mentions: { users: { has(id: string): boolean }; repliedUser?: { id: string } | null };
-  attachments: { values(): Iterable<{ name: string; url: string; contentType: string | null; size: number }> };
+  attachments: {
+    values(): Iterable<{ name: string; url: string; contentType: string | null; size: number; duration?: number | null }>;
+  };
+  flags?: { has(bit: number): boolean };
 }
 
 export type GateDecision =
@@ -113,7 +124,15 @@ export async function collectAttachments(
   config: Config,
   msg: IngressMessage,
   fetcher: Fetcher = (u) => fetch(u),
+  transcriber?: TranscriberLike,
 ): Promise<{ images: InboundImage[]; files: InboundFile[] }> {
+  const isVoice = (() => {
+    try {
+      return !!msg.flags?.has(VOICE_MESSAGE_FLAG);
+    } catch {
+      return false;
+    }
+  })();
   const images: InboundImage[] = [];
   const files: InboundFile[] = [];
   for (const a of msg.attachments.values()) {
@@ -127,9 +146,25 @@ export async function collectAttachments(
         continue;
       }
       const file: InboundFile = { name: a.name, url: a.url, contentType: a.contentType, size: a.size };
+      const audio = isAudioContentType(a.contentType, a.name);
+      if (isVoice && audio) file.voice = true;
+      if (audio && typeof a.duration === "number") file.durationSecs = a.duration;
       if (a.size <= config.MAX_FILE_BYTES) {
         const res = await fetcher(a.url);
         if (res.ok) file.data = new Blob([await res.arrayBuffer()], { type: a.contentType ?? "application/octet-stream" });
+      }
+      if (audio && transcriber && file.data) {
+        try {
+          const out = await transcriber.transcribe({
+            data: file.data,
+            filename: a.name,
+            contentType: a.contentType ?? "application/octet-stream",
+          });
+          file.transcript = out.text.trim();
+        } catch (err) {
+          file.transcriptError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+          log.warn("transcription failed", { name: a.name, err: file.transcriptError });
+        }
       }
       files.push(file);
     } catch (err) {
@@ -146,8 +181,9 @@ export async function normalize(
   route: RouteKey,
   botUserId: string,
   fetcher?: Fetcher,
+  transcriber?: TranscriberLike,
 ): Promise<InboundMessage> {
-  const { images, files } = await collectAttachments(config, msg, fetcher);
+  const { images, files } = await collectAttachments(config, msg, fetcher, transcriber);
   return {
     route,
     messageId: msg.id,

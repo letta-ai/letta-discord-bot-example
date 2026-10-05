@@ -243,6 +243,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
           url: f.url,
           contentType: f.contentType,
           size: f.size,
+          ...(f.voice ? { voice: true } : {}),
+          ...(f.durationSecs !== undefined ? { durationSecs: f.durationSecs } : {}),
+          ...(f.transcript !== undefined ? { transcript: f.transcript } : {}),
+          ...(f.transcriptError ? { transcriptError: f.transcriptError } : {}),
         };
         const safeName = `${m.messageId}-${f.name.replace(/[^\w.\-]+/g, "_")}`;
         if (!sandbox && f.data && config.LOCAL_ATTACHMENT_DIR) {

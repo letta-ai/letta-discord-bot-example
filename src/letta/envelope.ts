@@ -31,6 +31,10 @@ export interface UploadedAttachment {
   url?: string; // fallback when no sandbox
   contentType: string | null;
   size: number;
+  voice?: boolean;
+  durationSecs?: number;
+  transcript?: string;
+  transcriptError?: string;
 }
 
 /** Build the text envelope for one or more inbound messages on the same route. */
@@ -69,7 +73,10 @@ export function buildEnvelopeText(batch: InboundMessage[], attachments: Uploaded
           url: a.url,
           content_type: a.contentType,
           size: a.size,
-        })}/>`,
+          voice: a.voice ? "true" : undefined,
+          duration_secs: a.durationSecs,
+          transcript_error: a.transcriptError,
+        })}${a.transcript !== undefined ? `><transcript>${escapeXml(a.transcript)}</transcript></attachment>` : "/>"}`,
       );
     }
   }

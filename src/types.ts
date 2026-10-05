@@ -42,6 +42,10 @@ export interface InboundFile {
   contentType: string | null;
   size: number;
   data?: Blob; // filled by ingress when <= MAX_FILE_BYTES
+  voice?: boolean; // Discord voice message
+  durationSecs?: number;
+  transcript?: string; // speech-to-text result for audio
+  transcriptError?: string;
 }
 
 /** Normalized events emitted while a turn runs. */

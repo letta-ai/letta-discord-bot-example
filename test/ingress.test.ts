@@ -115,4 +115,42 @@ describe("helpers", () => {
     expect(files.map((f) => [f.name, !!f.data])).toEqual([["b.pdf", true], ["huge.bin", false]]);
     expect(fetched).toEqual(["u1", "u2"]);
   });
+
+  test("collectAttachments transcribes audio and voice messages, keeps the file on failure", async () => {
+    const m = msg();
+    (m as any).flags = { has: (bit: number) => bit === 1 << 13 };
+    m.attachments = {
+      values: () => [
+        { name: "voice-message.ogg", url: "v1", contentType: "audio/ogg", size: 10, duration: 4.2 },
+        { name: "song.mp3", url: "v2", contentType: "audio/mpeg", size: 10 },
+        { name: "notes.txt", url: "v3", contentType: "text/plain", size: 10 },
+      ],
+    } as any;
+    const fetcher = async () => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode("abc").buffer as ArrayBuffer });
+    const seen: string[] = [];
+    const transcriber = {
+      async transcribe(input: { data: Blob; filename: string; contentType: string }) {
+        seen.push(`${input.filename}:${input.contentType}:${input.data.size}`);
+        if (input.filename === "song.mp3") throw new Error("groq HTTP 400: bad audio");
+        return { text: "hello <there>", provider: "groq" as const, model: "whisper-large-v3-turbo" };
+      },
+    };
+    const { files } = await collectAttachments(cfg(), m, fetcher, transcriber);
+    expect(seen).toEqual(["voice-message.ogg:audio/ogg:3", "song.mp3:audio/mpeg:3"]);
+    const [voice, song, notes] = files;
+    expect(voice).toMatchObject({ name: "voice-message.ogg", voice: true, durationSecs: 4.2, transcript: "hello <there>" });
+    expect(song!.transcript).toBeUndefined();
+    expect(song!.transcriptError).toContain("groq HTTP 400");
+    expect(song!.data).toBeDefined();
+    expect(notes!.transcript).toBeUndefined();
+    expect(notes!.transcriptError).toBeUndefined();
+  });
+
+  test("collectAttachments skips transcription without a transcriber", async () => {
+    const m = msg();
+    m.attachments = { values: () => [{ name: "a.ogg", url: "v1", contentType: "audio/ogg", size: 10 }] };
+    const fetcher = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(3) });
+    const { files } = await collectAttachments(cfg(), m, fetcher);
+    expect(files[0]!.transcript).toBeUndefined();
+  });
 });

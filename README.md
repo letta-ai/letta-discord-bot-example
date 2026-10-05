@@ -85,6 +85,13 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `DEBOUNCE_MS` | `1500` | Merge messages arriving in this window into one turn. |
 | `MAX_IMAGE_BYTES` | `5242880` | Largest inline image, 5 MiB. |
 | `MAX_FILE_BYTES` | `26214400` | Largest uploaded file, 25 MiB. |
+| `LOCAL_ATTACHMENT_DIR` | unset | When turns run on a named computer that shares this filesystem, save attachments here and give the agent local paths. |
+| `TRANSCRIBE_PROVIDER` | `none` | Speech-to-text for voice messages and audio files: `openai`, `groq`, `mistral`, `together`, `deepgram`, `assemblyai`, `elevenlabs`, `gemini`, or `openai-compatible`. |
+| `TRANSCRIBE_API_KEY` | unset | Provider API key. Required for every provider except `openai-compatible`. |
+| `TRANSCRIBE_MODEL` | provider default | Override the model, see the table under Voice messages. |
+| `TRANSCRIBE_BASE_URL` | provider default | Override the API base (proxies). Required for `openai-compatible`. |
+| `TRANSCRIBE_LANGUAGE` | unset | Language hint such as `en`; otherwise the provider detects it. |
+| `TRANSCRIBE_TIMEOUT_SECONDS` | `60` | Per-attachment transcription timeout. |
 | `DATA_DIR` | `./data` | Directory holding the route to conversation index. Mount this. |
 | `HEALTH_PORT` | `8080` | Port serving `GET /healthz`. |
 | `SESSION_IDLE_MINUTES` | `15` | Close an idle Letta session. The conversation is kept. |
@@ -150,10 +157,33 @@ and belongs to whoever deploys the listener.
 ## Files and images
 
 Images at or below `MAX_IMAGE_BYTES` are inlined to the model as multimodal content. Anything else
-is downloaded by the listener and uploaded into the conversation sandbox under `/root/downloads`,
-and the envelope lists those paths. The agent can send files back to the route from
+is downloaded by the listener and uploaded into the conversation sandbox under `/root/downloads`
+(or saved to `LOCAL_ATTACHMENT_DIR` when turns run on a named computer). The envelope lists each
+local path together with the original Discord CDN url, which the agent can re-download from later. The agent can send files back to the route from
 `/root/downloads` with `discord_send_file`. Replies longer than the Discord limit are split on
 paragraph and line boundaries with code fences kept balanced across chunks.
+
+## Voice messages
+
+With `TRANSCRIBE_PROVIDER` set, Discord voice messages and audio attachments are transcribed by the
+listener before the turn starts. The transcript goes into the envelope inside the attachment
+element, so the agent reads the words without a tool call. The audio file is still attached. A
+failed transcription never drops the message; the attachment carries `transcript_error` instead.
+
+| Provider | Default model | Notes |
+| --- | --- | --- |
+| `groq` | `whisper-large-v3-turbo` | Fast Whisper. Accepts Discord's Ogg/Opus directly. |
+| `deepgram` | `nova-3` | Accepts Ogg/Opus directly; detects language unless `TRANSCRIBE_LANGUAGE` is set. |
+| `openai` | `gpt-4o-mini-transcribe` | Also `gpt-4o-transcribe`, `whisper-1`. OpenAI's docs disagree on Ogg support, so prefer Groq or Deepgram for voice messages. |
+| `elevenlabs` | `scribe_v2` | |
+| `assemblyai` | `universal-3-5-pro` | Upload and poll; slower for short clips. |
+| `mistral` | `voxtral-mini-latest` | |
+| `together` | `openai/whisper-large-v3` | |
+| `gemini` | `gemini-3.8-flash` | Prompted transcription; inline audio up to 20 MB. |
+| `openai-compatible` | `whisper-1` | Self-hosted Whisper with `/v1/audio/transcriptions`, such as Speaches (`http://localhost:8000/v1`) or LocalAI (`http://localhost:8080/v1`). The native whisper.cpp server is not OpenAI-compatible. |
+
+Voice messages cannot contain a mention, so they reach the agent in bot threads, DMs, and channels
+listed in `DISCORD_OPEN_CHANNEL_IDS`, not as a fresh mention in a channel.
 
 ## Deploying
 
