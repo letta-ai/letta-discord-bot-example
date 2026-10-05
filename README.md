@@ -77,7 +77,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `RESPOND_TO_BOTS` | `false` | Answer messages from other bots. |
 | `AUTO_THREAD` | `true` | Create a public thread when mentioned in a normal channel. |
 | `REGISTER_SLASH_COMMANDS` | `true` | Register `/new` `/cancel` `/status` `/help` on startup. |
-| `STREAM_EDITS` | `true` | Edit one message while streaming instead of posting only at the end. |
+| `STREAM_EDITS` | `false` | Post the reply once when the turn finishes. Set `true` to stream by editing one message as text arrives. |
 | `STREAM_EDIT_INTERVAL_MS` | `1200` | Minimum gap between streaming edits. |
 | `SHOW_TOOL_STATUS` | `true` | Show a single in-place tool status line. |
 | `SHOW_REASONING` | `false` | Stream reasoning summaries as a separate message. |

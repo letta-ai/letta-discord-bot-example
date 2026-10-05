@@ -56,7 +56,7 @@ export const ConfigSchema = z.object({
   REGISTER_SLASH_COMMANDS: bool(true),
 
   // UX
-  STREAM_EDITS: bool(true),
+  STREAM_EDITS: bool(false),
   STREAM_EDIT_INTERVAL_MS: int(1200),
   SHOW_TOOL_STATUS: bool(true),
   SHOW_REASONING: bool(false),

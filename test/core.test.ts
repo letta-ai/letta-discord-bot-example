@@ -127,6 +127,10 @@ describe("config", () => {
     expect(() => loadConfig({})).toThrow(/DISCORD_BOT_TOKEN/);
     expect(() => loadConfig({ ...base, LETTA_AGENT_ID: "nope" })).toThrow(/agent-/);
   });
+  test("streaming edits are off by default and can be enabled", () => {
+    expect(loadConfig(base).STREAM_EDITS).toBe(false);
+    expect(loadConfig({ ...base, STREAM_EDITS: "true" }).STREAM_EDITS).toBe(true);
+  });
   test("parses csv, booleans, ints and defaults", () => {
     const c = loadConfig({ ...base, DISCORD_ADMIN_USER_IDS: " a, b ,,c ", STREAM_EDITS: "no", DEBOUNCE_MS: "0" });
     expect(c.DISCORD_ADMIN_USER_IDS).toEqual(["a", "b", "c"]);
