@@ -53,6 +53,8 @@ export type TurnEvent =
   | { kind: "tool_result"; toolCallId: string; isError: boolean }
   | { kind: "retry"; attempt: number; maxAttempts: number }
   | { kind: "files_uploaded"; paths: string[] }
+  /** This message arrived mid-turn and was merged into a later turn. */
+  | { kind: "merged"; intoMessageId: string }
   | { kind: "done"; success: boolean; errorCode?: string; durationMs: number }
   | { kind: "error"; message: string };
 
@@ -83,13 +85,19 @@ export interface TurnContext {
   onEvent: (event: TurnEvent) => void;
   /** Ask a human in Discord to approve a tool call. */
   requestApproval: (req: ApprovalRequest) => Promise<ApprovalDecision>;
-  /**
-   * Builds listener-owned client tools (react, history, send_file...) bound to
-   * this route. Receives a sandbox-file downloader so send_file can pull from
-   * the conversation's sandbox. Return [] to disable.
-   */
-  buildTools: (sandbox: SandboxFiles | null) => AnyAgentTool[];
 }
+
+/**
+ * Builds listener-owned client tools (react, history, send_file...) for one
+ * route. Called once per pooled session, so tools must read per-turn state via
+ * `currentTurn()` rather than capturing a TurnContext. `sandbox` is the
+ * conversation's managed-sandbox file client (null on a custom computer).
+ */
+export type ToolFactory = (
+  route: RouteKey,
+  currentTurn: () => TurnContext | null,
+  sandbox: SandboxFiles | null,
+) => AnyAgentTool[];
 
 /** Narrow view of the SDK's managed-sandbox file client. */
 export interface SandboxFiles {

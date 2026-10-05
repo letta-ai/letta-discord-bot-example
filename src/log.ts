@@ -1,6 +1,7 @@
 type Level = "debug" | "info" | "warn" | "error";
 const order: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
-let threshold: Level = (process.env.LOG_LEVEL as Level) || "info";
+let threshold: Level =
+  (process.env.LOG_LEVEL as Level) || (process.env.NODE_ENV === "test" ? "error" : "info");
 
 export function setLogLevel(level: Level) {
   threshold = level;
