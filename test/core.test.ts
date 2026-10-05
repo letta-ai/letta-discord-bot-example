@@ -159,6 +159,10 @@ describe("config", () => {
     expect(c.PERMISSION_MODE).toBe("standard");
     expect(c.DM_POLICY).toBe("allowlist");
   });
+  test("lifecycle reactions are off by default and can be enabled", () => {
+    expect(loadConfig(base).LIFECYCLE_REACTIONS).toBe(false);
+    expect(loadConfig({ ...base, LIFECYCLE_REACTIONS: "true" }).LIFECYCLE_REACTIONS).toBe(true);
+  });
   test("transcription is off by default and validates provider settings", () => {
     expect(loadConfig(base).TRANSCRIBE_PROVIDER).toBe("none");
     expect(() => loadConfig({ ...base, TRANSCRIBE_PROVIDER: "groq" })).toThrow(/TRANSCRIBE_API_KEY/);

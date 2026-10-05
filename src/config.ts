@@ -62,7 +62,7 @@ export const ConfigSchema = z.object({
   STREAM_EDIT_INTERVAL_MS: int(1200),
   SHOW_TOOL_STATUS: bool(true),
   SHOW_REASONING: bool(false),
-  LIFECYCLE_REACTIONS: bool(true),
+  LIFECYCLE_REACTIONS: bool(false),
   DEBOUNCE_MS: int(1500),
   MAX_IMAGE_BYTES: int(5 * 1024 * 1024),
   MAX_FILE_BYTES: int(25 * 1024 * 1024),

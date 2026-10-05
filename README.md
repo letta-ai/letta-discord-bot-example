@@ -82,7 +82,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `STREAM_EDIT_INTERVAL_MS` | `1200` | Minimum gap between streaming edits. |
 | `SHOW_TOOL_STATUS` | `true` | Show a single in-place tool status line. |
 | `SHOW_REASONING` | `false` | Stream reasoning summaries as a separate message. |
-| `LIFECYCLE_REACTIONS` | `true` | React to the triggering message when a turn succeeds (✅), fails (❌) or is cancelled (⏹️). |
+| `LIFECYCLE_REACTIONS` | `false` | When on, react to the triggering message when a turn succeeds (✅), fails (❌) or is cancelled (⏹️). |
 | `DEBOUNCE_MS` | `1500` | Merge messages arriving in this window into one turn. |
 | `MAX_IMAGE_BYTES` | `5242880` | Largest inline image, 5 MiB. |
 | `MAX_FILE_BYTES` | `26214400` | Largest uploaded file, 25 MiB. |
