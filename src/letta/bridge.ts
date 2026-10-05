@@ -91,6 +91,17 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     return s;
   }
 
+  /** Drop queued turns, telling each one it was interrupted so its renderer settles. */
+  function dropQueue(s: RouteState): number {
+    const dropped = s.queue.splice(0, s.queue.length);
+    for (const it of dropped) {
+      try {
+        it.ctx.onEvent({ kind: "done", success: false, errorCode: "interrupted", durationMs: 0 });
+      } catch {}
+    }
+    return dropped.length;
+  }
+
   function closeSession(s: RouteState, reason: string) {
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.idleTimer = null;
@@ -366,8 +377,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     async cancel(route) {
       const s = routes.get(routeKeyString(route));
       if (!s) return false;
-      const hadQueue = s.queue.length > 0;
-      s.queue.length = 0;
+      const hadQueue = dropQueue(s) > 0;
       if (!s.busy || !s.session) return hadQueue;
       s.aborted = true;
       try {
@@ -382,7 +392,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       const key = routeKeyString(route);
       const s = routes.get(key);
       if (s) {
-        s.queue.length = 0;
+        dropQueue(s);
         if (s.busy && s.session) {
           s.aborted = true;
           await s.session.abort().catch(() => {});
@@ -415,7 +425,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       shuttingDown = true;
       await Promise.all(
         [...routes.values()].map(async (s) => {
-          s.queue.length = 0;
+          dropQueue(s);
           if (s.busy && s.session) await s.session.abort().catch(() => {});
           closeSession(s, "shutdown");
         }),

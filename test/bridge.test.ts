@@ -214,6 +214,20 @@ describe("bridge", () => {
     expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "interrupted" });
   });
 
+  test("cancel settles queued turns with interrupted", async () => {
+    const { client } = fakeClient(() => [{ type: "assistant", content: "partial" } as SDKMessage]);
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const running = ctxCollector("m1");
+    const queued = ctxCollector("m2");
+    const p1 = bridge.submit([inbound("m1", "long")], running.ctx);
+    while (!running.events.some((e) => e.kind === "assistant_delta")) await new Promise((r) => setTimeout(r, 1));
+    const p2 = bridge.submit([inbound("m2", "queued")], queued.ctx);
+    expect((await bridge.status(route, false)).queued).toBe(1);
+    await bridge.cancel(route);
+    await Promise.all([p1, p2]);
+    expect(queued.events).toEqual([{ kind: "done", success: false, errorCode: "interrupted", durationMs: 0 }]);
+  });
+
   test("canUseTool routes to the turn's approval callback and respects deny", async () => {
     const { client, calls } = fakeClient(() => ok("x"));
     const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
