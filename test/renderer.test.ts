@@ -99,6 +99,25 @@ describe("TurnRenderer", () => {
     expect(channel.typing).toBeGreaterThanOrEqual(1);
   });
 
+  test("with stream edits disabled, posts the full reply once with no edits", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config({ STREAM_EDITS: false }), channel, triggerMessage: trigger });
+
+    renderer.onEvent({ kind: "started", conversationId: "c", createdConversation: false });
+    for (const t of ["Hello", ", ", "world", "!"]) {
+      renderer.onEvent({ kind: "assistant_delta", text: t });
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(channel.sent.length).toBe(0);
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+
+    expect(channel.sent.map((m) => m.content)).toEqual(["Hello, world!"]);
+    expect(channel.sent[0]!.edits.length).toBe(0);
+    expect(trigger.reacted).toEqual(["✅"]);
+  });
+
   test("buffers when stream edits are disabled and hides internal failures", async () => {
     const channel = new FakeChannel(true);
     const trigger = new FakeMessage();
