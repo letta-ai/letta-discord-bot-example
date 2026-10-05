@@ -66,6 +66,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `CONVERSATION_MODEL` | unset | Model pinned when a conversation is created. |
 | `APPROVAL_MODE` | `admins` | `deny`, `admins`, `requester` or `allow`. |
 | `APPROVAL_TIMEOUT_SECONDS` | `300` | How long an approval stays clickable, then deny. |
+| `TURN_TIMEOUT_SECONDS` | `900` | Longest a whole turn may run, approval waits included. Must exceed `APPROVAL_TIMEOUT_SECONDS`. The SDK's own default is 2 minutes. |
 | `ENABLE_DISCORD_TOOLS` | `true` | Expose the listener-owned Discord tools to the agent. |
 | `DISCORD_GUILD_IDS` | empty (CSV) | Guild allowlist, empty means any guild the bot is in. |
 | `DISCORD_CHANNEL_IDS` | empty (CSV) | Channel allowlist, empty means any channel. |

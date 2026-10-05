@@ -80,18 +80,25 @@ export function assistantMessageId(msg: { uuid?: string; otid?: string | null })
   return typeof msg.otid === "string" && msg.otid ? `otid:${msg.otid}` : undefined;
 }
 
+/** Options for the SDK's cloud client. */
+export function clientOptions(config: Config) {
+  return {
+    backend: "cloud" as const,
+    apiKey: config.LETTA_API_KEY,
+    ...(config.LETTA_BASE_URL ? { apiBaseUrl: config.LETTA_BASE_URL } : {}),
+    // The SDK fails any turn still running after this long (default 2 min), and
+    // the clock keeps running while a Discord approval is pending.
+    requestTimeoutMs: config.TURN_TIMEOUT_SECONDS * 1000,
+    // A named computer and managed-sandbox options are mutually exclusive in the SDK.
+    ...(config.LETTA_COMPUTER
+      ? { computer: config.LETTA_COMPUTER }
+      : { sandbox: { ttlMinutes: Math.min(60, Math.max(1, config.SANDBOX_TTL_MINUTES)) } }),
+  };
+}
+
 export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentBridge {
   const client: LettaClientLike =
-    deps.client ??
-    (new LettaAgentClient({
-      backend: "cloud",
-      apiKey: config.LETTA_API_KEY,
-      ...(config.LETTA_BASE_URL ? { apiBaseUrl: config.LETTA_BASE_URL } : {}),
-      // A named computer and managed-sandbox options are mutually exclusive in the SDK.
-      ...(config.LETTA_COMPUTER
-        ? { computer: config.LETTA_COMPUTER }
-        : { sandbox: { ttlMinutes: Math.min(60, Math.max(1, config.SANDBOX_TTL_MINUTES)) } }),
-    }) as unknown as LettaClientLike);
+    deps.client ?? (new LettaAgentClient(clientOptions(config)) as unknown as LettaClientLike);
   const store = deps.store ?? new RouteStore(config.DATA_DIR);
   const routes = new Map<string, RouteState>();
   let shuttingDown = false;

@@ -42,6 +42,7 @@ export const ConfigSchema = z.object({
   CONVERSATION_MODEL: z.string().optional(), // pinned at conversation create
   APPROVAL_MODE: z.enum(["deny", "admins", "requester", "allow"]).default("admins"),
   APPROVAL_TIMEOUT_SECONDS: int(300),
+  TURN_TIMEOUT_SECONDS: int(900), // whole turn, including approval waits
   ENABLE_DISCORD_TOOLS: bool(true),
 
   // Discord gating
@@ -83,6 +84,9 @@ export const ConfigSchema = z.object({
   SESSION_IDLE_MINUTES: int(15),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 }).superRefine((c, ctx) => {
+  if (c.TURN_TIMEOUT_SECONDS <= 0 || (c.APPROVAL_MODE !== "allow" && c.APPROVAL_MODE !== "deny" && c.TURN_TIMEOUT_SECONDS <= c.APPROVAL_TIMEOUT_SECONDS)) {
+    ctx.addIssue({ code: "custom", path: ["TURN_TIMEOUT_SECONDS"], message: "must be positive and longer than APPROVAL_TIMEOUT_SECONDS" });
+  }
   const p = c.TRANSCRIBE_PROVIDER;
   if (p !== "none" && p !== "openai-compatible" && !c.TRANSCRIBE_API_KEY) {
     ctx.addIssue({ code: "custom", path: ["TRANSCRIBE_API_KEY"], message: `required when TRANSCRIBE_PROVIDER=${p}` });

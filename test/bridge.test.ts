@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage } from "@letta-ai/letta-agent-sdk";
 import { loadConfig } from "../src/config.ts";
-import { createAgentBridge, type LettaClientLike } from "../src/letta/bridge.ts";
+import { clientOptions, createAgentBridge, type LettaClientLike } from "../src/letta/bridge.ts";
 import { RouteStore } from "../src/letta/store.ts";
 import type { InboundMessage, RouteKey, TurnContext, TurnEvent } from "../src/types.ts";
 
@@ -303,3 +303,16 @@ describe("bridge", () => {
     expect(calls.creates).toBe(2);
   });
 });
+
+describe("clientOptions", () => {
+  const base = { DISCORD_BOT_TOKEN: "x", LETTA_API_KEY: "k", LETTA_AGENT_ID: "agent-1" };
+  test("turn timeout covers approval waits and is configurable", () => {
+    expect(clientOptions(loadConfig(base)).requestTimeoutMs).toBe(900_000);
+    expect(clientOptions(loadConfig({ ...base, TURN_TIMEOUT_SECONDS: "1800" })).requestTimeoutMs).toBe(1_800_000);
+    expect(clientOptions(loadConfig({ ...base, LETTA_COMPUTER: "box" }))).toMatchObject({ computer: "box", requestTimeoutMs: 900_000 });
+  });
+  test("rejects a turn timeout shorter than the approval timeout", () => {
+    expect(() => loadConfig({ ...base, TURN_TIMEOUT_SECONDS: "120", APPROVAL_TIMEOUT_SECONDS: "300" })).toThrow(/TURN_TIMEOUT_SECONDS/);
+  });
+});
+
