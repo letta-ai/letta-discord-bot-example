@@ -14,6 +14,7 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "bun run src/index.ts",
+    "doctor": "bun run src/doctor.ts",
     "dev": "bun --watch run src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p ."

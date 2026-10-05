@@ -1,9 +1,15 @@
-# Copy to fly.toml, then: fly secrets set DISCORD_BOT_TOKEN=... LETTA_API_KEY=... LETTA_AGENT_ID=...
-# One replica only. A second replica would open a second Gateway session for the
-# same bot token and duplicate replies.
+# Copy to fly.toml and change `app`. Full steps: docs/deploying.md#flyio
+#
+# The listener makes only outbound connections (Discord Gateway, Letta API), so
+# this config exposes no public service. The health check below runs inside
+# Fly's network and is used for monitoring, not routing.
 
 app = "letta-discord-listener"
 primary_region = "iad"
+
+# The listener needs up to 15s to cancel pending approvals and close sessions.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
 
 [build]
   dockerfile = "Dockerfile"
@@ -11,33 +17,32 @@ primary_region = "iad"
 [env]
   DATA_DIR = "/app/data"
   HEALTH_PORT = "8080"
-  NODE_ENV = "production"
   LOG_LEVEL = "info"
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  # Never scale to zero, a warm Gateway connection is not worth the boot delay.
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
-  processes = ["app"]
-
-[[http_service.checks]]
-  grace_period = "30s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/healthz"
+# Keep exactly one Machine. A second one would open a second Gateway session for
+# the same bot token and reply twice. With a volume attached, the default
+# `rolling` strategy replaces the single Machine in place, so deploys never
+# overlap (canary and bluegreen are unavailable with volumes anyway).
+[deploy]
+  strategy = "rolling"
 
 [[mounts]]
   source = "listener_data"
   destination = "/app/data"
 
+[checks]
+  [checks.healthz]
+    type = "http"
+    port = 8080
+    method = "get"
+    path = "/healthz"
+    grace_period = "30s"
+    interval = "30s"
+    timeout = "5s"
+
+[[restart]]
+  policy = "always"
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
-
-# Rolling restarts briefly overlap processes, which is why replicas must stay at 1.
-[deploy]
-  strategy = "rolling"

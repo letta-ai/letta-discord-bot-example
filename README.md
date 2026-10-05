@@ -45,6 +45,12 @@ This is a listener you run yourself, the alternative to letting Letta run Letta 
    Dependencies install with npm (`package-lock.json`) because Bun 1.3.14's resolver crashes on
    this dependency graph. Bun is still the runtime; `bun run src/index.ts` runs the entrypoint directly.
 
+### Checking your setup
+
+Before starting the listener, run `bun run doctor`. It validates configuration, Discord access and
+permissions, the Letta agent and computer, transcription credentials when they can be checked without
+audio, and `DATA_DIR` write access. It does not connect to the Discord Gateway or post messages.
+
 ## Configuration
 
 All configuration is env only, validated by `ConfigSchema` in `src/config.ts`. Defaults below are
@@ -188,28 +194,13 @@ listed in `DISCORD_OPEN_CHANNEL_IDS`, not as a fresh mention in a channel.
 
 ## Deploying
 
-One replica only. A second process with the same bot token opens a second Gateway session and will
-duplicate replies. Scale by conversation count, not by listener count.
+Run exactly one instance. A second process with the same bot token opens a second Gateway session
+and duplicates replies. Keep `DATA_DIR` on persistent storage, allow about 30 seconds to stop, and
+expose no public port; `GET /healthz` on `HEALTH_PORT` is for platform health checks.
 
-Docker:
-
-```bash
-docker build -t letta-discord-listener .
-docker run -d --name listener --env-file .env -p 8080:8080 -v listener-data:/app/data letta-discord-listener
-```
-
-The image installs production dependencies with `npm ci` in a build stage, runs as the
-unprivileged `bun` user, and health checks `GET /healthz` on port 8080.
-
-Fly.io: copy `fly.toml.example` to `fly.toml`, set the secrets with `fly secrets set`, create the
-volume with `fly volumes create listener_data`, then `fly deploy`.
-
-Railway: `railway.json` builds the same Dockerfile with one replica. Add the three required
-variables in the dashboard and mount a volume at `/app/data`.
-
-Point your platform health check at `/healthz`, and keep `DATA_DIR` on persistent storage. Losing
-that volume only costs the route to conversation mapping: existing conversations stay in Letta, new
-messages start new ones.
+[docs/deploying.md](docs/deploying.md) covers systemd (with a tested unit in `deploy/systemd/`),
+Docker Compose (`deploy/compose.yaml`), Fly.io (`fly.toml.example`), Railway, and Render, and
+explains why Modal is a poor fit.
 
 ## Comparison with Letta Code Channels
 
