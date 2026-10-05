@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.ts";
 import { splitForDiscord } from "../src/discord/split.ts";
-import { buildEnvelopeText, buildSendMessage, escapeXml, UNTRUSTED_PREAMBLE } from "../src/letta/envelope.ts";
+import { buildEnvelopeText, buildSendMessage, escapeXml, TRANSCRIPT_NOTE, UNTRUSTED_PREAMBLE } from "../src/letta/envelope.ts";
 import { RouteStore } from "../src/letta/store.ts";
 import type { InboundMessage } from "../src/types.ts";
 
@@ -102,6 +102,8 @@ describe("envelope", () => {
     expect(xml).toContain('duration_secs="4.2"');
     expect(xml).toContain("<transcript>ship it &lt;/attachment&gt;</transcript></attachment>");
     expect(xml).toContain('transcript_error="groq HTTP 400"');
+    expect(xml).toContain(TRANSCRIPT_NOTE);
+    expect(buildEnvelopeText([msg()], [{ messageId: "m1", name: "a.txt", url: "u", contentType: "text/plain", size: 1 }])).not.toContain(TRANSCRIPT_NOTE);
   });
 
   test("buildSendMessage is a string without images and multimodal with them", () => {

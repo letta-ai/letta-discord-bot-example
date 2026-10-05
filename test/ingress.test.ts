@@ -121,7 +121,7 @@ describe("helpers", () => {
     (m as any).flags = { has: (bit: number) => bit === 1 << 13 };
     m.attachments = {
       values: () => [
-        { name: "voice-message.ogg", url: "v1", contentType: "audio/ogg", size: 10, duration: 4.2 },
+        { name: "voice-message.ogg", url: "v1", contentType: "audio/ogg", size: 10, duration: 4.059999942779541 },
         { name: "song.mp3", url: "v2", contentType: "audio/mpeg", size: 10 },
         { name: "notes.txt", url: "v3", contentType: "text/plain", size: 10 },
       ],
@@ -138,7 +138,7 @@ describe("helpers", () => {
     const { files } = await collectAttachments(cfg(), m, fetcher, transcriber);
     expect(seen).toEqual(["voice-message.ogg:audio/ogg:3", "song.mp3:audio/mpeg:3"]);
     const [voice, song, notes] = files;
-    expect(voice).toMatchObject({ name: "voice-message.ogg", voice: true, durationSecs: 4.2, transcript: "hello <there>" });
+    expect(voice).toMatchObject({ name: "voice-message.ogg", voice: true, durationSecs: 4.1, transcript: "hello <there>" });
     expect(song!.transcript).toBeUndefined();
     expect(song!.transcriptError).toContain("groq HTTP 400");
     expect(song!.data).toBeDefined();

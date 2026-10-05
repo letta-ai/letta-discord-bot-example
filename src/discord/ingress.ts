@@ -148,7 +148,7 @@ export async function collectAttachments(
       const file: InboundFile = { name: a.name, url: a.url, contentType: a.contentType, size: a.size };
       const audio = isAudioContentType(a.contentType, a.name);
       if (isVoice && audio) file.voice = true;
-      if (audio && typeof a.duration === "number") file.durationSecs = a.duration;
+      if (audio && typeof a.duration === "number") file.durationSecs = Math.round(a.duration * 10) / 10;
       if (a.size <= config.MAX_FILE_BYTES) {
         const res = await fetcher(a.url);
         if (res.ok) file.data = new Blob([await res.arrayBuffer()], { type: a.contentType ?? "application/octet-stream" });

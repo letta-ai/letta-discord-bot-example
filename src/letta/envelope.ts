@@ -9,6 +9,10 @@ export const ATTACHMENT_NOTE =
   "Attachments: `path` is a local copy, already downloaded for you. `url` is the original Discord CDN link; " +
   "re-download from it if you need the file again later (links are signed and expire after about a day).";
 
+export const TRANSCRIPT_NOTE =
+  "Audio: a `<transcript>` inside an attachment is the speech already transcribed for you; " +
+  "reply to what was said and only open the audio file if the transcript is unclear.";
+
 export function escapeXml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -82,6 +86,7 @@ export function buildEnvelopeText(batch: InboundMessage[], attachments: Uploaded
   }
   lines.push("</channel-notification>");
   if (attachments.length > 0) lines.splice(1, 0, ATTACHMENT_NOTE);
+  if (attachments.some((a) => a.transcript !== undefined)) lines.splice(2, 0, TRANSCRIPT_NOTE);
   return lines.join("\n");
 }
 
