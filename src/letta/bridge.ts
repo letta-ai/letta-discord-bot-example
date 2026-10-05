@@ -57,6 +57,18 @@ interface RouteState {
   aborted: boolean;
 }
 
+/**
+ * Human-readable status for a tool call. Prefers the tool's own `description`
+ * argument (Bash, Agent, etc. always carry one), else `Name primary-arg`.
+ */
+export function toolLabel(name: string, input: Record<string, unknown>): string {
+  const pick = (k: string) => (typeof input[k] === "string" && (input[k] as string).trim() ? (input[k] as string) : undefined);
+  const arg = pick("command") ?? pick("file_path") ?? pick("path") ?? pick("pattern") ?? pick("query") ?? pick("url");
+  const raw = pick("description") ?? (arg ? `${name} ${arg}` : name);
+  const oneLine = raw.replace(/\s+/g, " ").trim();
+  return oneLine.length > 100 ? `${oneLine.slice(0, 97)}...` : oneLine;
+}
+
 export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentBridge {
   const client: LettaClientLike =
     deps.client ??
@@ -239,14 +251,6 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     return out;
   }
 
-  function summarizeTool(name: string, input: Record<string, unknown>): string {
-    const pick = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : undefined);
-    const raw =
-      pick("command") ?? pick("file_path") ?? pick("path") ?? pick("pattern") ?? pick("query") ?? pick("url") ?? "";
-    const oneLine = raw.replace(/\s+/g, " ").trim();
-    return oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine;
-  }
-
   /** Map one SDK message to zero or more normalized events. Returns true on terminal result. */
   function mapMessage(msg: SDKMessage, emit: (e: TurnEvent) => void, seenText: { v: boolean }): boolean {
     switch (msg.type) {
@@ -264,7 +268,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
           kind: "tool_call",
           toolCallId: msg.toolCallId,
           toolName: msg.toolName,
-          summary: summarizeTool(msg.toolName, msg.toolInput ?? {}),
+          summary: toolLabel(msg.toolName, msg.toolInput ?? {}),
         });
         return false;
       case "tool_result":

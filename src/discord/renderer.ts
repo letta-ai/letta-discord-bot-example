@@ -118,7 +118,7 @@ export class TurnRenderer {
       case "tool_call":
         this.toolIds.add(e.toolCallId);
         if (!this.config.SHOW_TOOL_STATUS) return;
-        this.toolLine = e.summary ? `-# 🔧 ${e.toolName}: ${e.summary}` : `-# 🔧 ${e.toolName}`;
+        this.toolLine = `-# ${e.summary || e.toolName}`;
         this.reasoning = "";
         this.scheduleStatusSync();
         return;

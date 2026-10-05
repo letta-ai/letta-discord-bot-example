@@ -135,6 +135,19 @@ describe("TurnRenderer", () => {
     expect(status.deleted).toBe(true);
   });
 
+  test("tool status shows only the label, no wrench or tool name", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger });
+
+    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "Check system info" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(channel.sent.map((m) => m.content)).toContain("-# Check system info");
+
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+  });
+
   test("merged turns render only the redirect reaction", async () => {
     const channel = new FakeChannel();
     const trigger = new FakeMessage();
