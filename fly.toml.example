@@ -1,0 +1,43 @@
+# Copy to fly.toml, then: fly secrets set DISCORD_BOT_TOKEN=... LETTA_API_KEY=... LETTA_AGENT_ID=...
+# One replica only. A second replica would open a second Gateway session for the
+# same bot token and duplicate replies.
+
+app = "letta-discord-listener"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/app/data"
+  HEALTH_PORT = "8080"
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Never scale to zero, a warm Gateway connection is not worth the boot delay.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/healthz"
+
+[[mounts]]
+  source = "listener_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# Rolling restarts briefly overlap processes, which is why replicas must stay at 1.
+[deploy]
+  strategy = "rolling"
