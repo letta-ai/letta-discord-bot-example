@@ -300,7 +300,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     s.current = ctx;
     s.aborted = false;
     const seenText = { v: false };
-    // Signal the turn immediately so Discord shows 👀 + typing while the
+    // Signal the turn immediately so Discord shows typing while the
     // conversation and sandbox spin up (session start can take 10s+).
     emit({ kind: "started", conversationId: s.conversationId ?? "", createdConversation: !s.conversationId });
     for (let attempt = 1; attempt <= 2; attempt++) {

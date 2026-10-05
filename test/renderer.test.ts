@@ -94,8 +94,8 @@ describe("TurnRenderer", () => {
     expect(replies.length).toBe(2);
     expect(replies.every((m) => m.content.length <= 2000)).toBe(true);
     expect(replies.map((m) => m.content).join("")).toBe("x".repeat(2100));
-    expect(trigger.reacted).toEqual(["👀", "✅"]);
-    expect(trigger.removedLook).toBe(1);
+    expect(trigger.reacted).toEqual(["✅"]);
+    expect(trigger.removedLook).toBe(0); // no 👀 to clean up
     expect(channel.typing).toBeGreaterThanOrEqual(1);
   });
 
@@ -115,7 +115,7 @@ describe("TurnRenderer", () => {
 
     expect(channel.sent.map((m) => m.content)).toEqual([FAILURE_TEXT]);
     expect(channel.sent[0]!.content).not.toContain("secret-id");
-    expect(trigger.reacted).toEqual(["👀", "❌"]);
+    expect(trigger.reacted).toEqual(["❌"]);
   });
 
   test("updates and removes one tool status message", async () => {

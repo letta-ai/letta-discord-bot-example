@@ -102,7 +102,7 @@ export class TurnRenderer {
     if (this.ended) return;
     switch (e.kind) {
       case "started":
-        this.react("👀");
+        // Typing is the in-progress signal; only the outcome gets a reaction.
         this.startTyping();
         return;
       case "assistant_delta":
@@ -315,12 +315,6 @@ export class TurnRenderer {
     });
 
     if (this.config.LIFECYCLE_REACTIONS) {
-      this.enqueue(async () => {
-        await this.trigger.reactions?.cache
-          .get("👀")
-          ?.users.remove()
-          .catch(() => {});
-      });
       this.react(interrupted ? "⏹️" : e.success ? "✅" : "❌");
     }
 
