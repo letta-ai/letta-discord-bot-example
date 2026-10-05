@@ -298,11 +298,13 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     s.current = ctx;
     s.aborted = false;
     const seenText = { v: false };
+    // Signal the turn immediately so Discord shows 👀 + typing while the
+    // conversation and sandbox spin up (session start can take 10s+).
+    emit({ kind: "started", conversationId: s.conversationId ?? "", createdConversation: !s.conversationId });
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const created = await ensureConversation(s, ctx);
+        await ensureConversation(s, ctx);
         const session = await ensureSession(s);
-        if (attempt === 1) emit({ kind: "started", conversationId: s.conversationId!, createdConversation: created });
         const attachments = await uploadFiles(s, session, batch, emit);
         await session.send(buildSendMessage(batch, attachments));
         let terminal = false;
