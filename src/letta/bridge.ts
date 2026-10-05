@@ -64,8 +64,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       backend: "cloud",
       apiKey: config.LETTA_API_KEY,
       ...(config.LETTA_BASE_URL ? { apiBaseUrl: config.LETTA_BASE_URL } : {}),
-      ...(config.LETTA_COMPUTER ? { computer: config.LETTA_COMPUTER } : {}),
-      sandbox: { ttlMinutes: Math.min(60, Math.max(1, config.SANDBOX_TTL_MINUTES)) },
+      // A named computer and managed-sandbox options are mutually exclusive in the SDK.
+      ...(config.LETTA_COMPUTER
+        ? { computer: config.LETTA_COMPUTER }
+        : { sandbox: { ttlMinutes: Math.min(60, Math.max(1, config.SANDBOX_TTL_MINUTES)) } }),
     }) as unknown as LettaClientLike);
   const store = deps.store ?? new RouteStore(config.DATA_DIR);
   const routes = new Map<string, RouteState>();
