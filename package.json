@@ -1,0 +1,22 @@
+{
+  "name": "letta-discord-listener",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "@letta-ai/letta-agent-sdk": "^0.8.30",
+    "discord.js": "^14.27.0",
+    "zod": "^4.6.5"
+  },
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "doctor": "bun run src/doctor.ts",
+    "dev": "bun --watch run src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p ."
+  }
+}
