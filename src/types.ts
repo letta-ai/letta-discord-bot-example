@@ -1,0 +1,126 @@
+/**
+ * Shared contract between the Discord layer (src/discord/**) and the Letta
+ * layer (src/letta/**). Neither side imports the other's internals; both
+ * depend only on this file, src/config.ts, and src/log.ts.
+ */
+import type { AnyAgentTool, SendMessage } from "@letta-ai/letta-agent-sdk";
+
+/** Stable routing key for one Discord conversation surface. */
+export interface RouteKey {
+  guildId: string | null; // null for DMs
+  channelId: string; // parent channel (or DM channel)
+  threadId: string | null; // thread id when the surface is a thread
+}
+
+export function routeKeyString(k: RouteKey): string {
+  return `${k.guildId ?? "dm"}:${k.channelId}:${k.threadId ?? "-"}`;
+}
+
+/** One inbound Discord message, already gated and normalized. */
+export interface InboundMessage {
+  route: RouteKey;
+  messageId: string;
+  authorId: string;
+  authorName: string;
+  authorIsBot: boolean;
+  text: string; // mention of the bot stripped
+  createdAt: string; // ISO
+  replyToMessageId?: string;
+  images: InboundImage[]; // small images, sent as multimodal content
+  files: InboundFile[]; // everything else, uploaded into the sandbox
+}
+
+export interface InboundImage {
+  name: string;
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  base64: string;
+}
+
+export interface InboundFile {
+  name: string;
+  url: string; // Discord CDN url
+  contentType: string | null;
+  size: number;
+  data?: Blob; // filled by ingress when <= MAX_FILE_BYTES
+}
+
+/** Normalized events emitted while a turn runs. */
+export type TurnEvent =
+  | { kind: "started"; conversationId: string; createdConversation: boolean }
+  | { kind: "assistant_delta"; text: string } // append-only fragment
+  | { kind: "reasoning_delta"; text: string }
+  | { kind: "tool_call"; toolCallId: string; toolName: string; summary: string }
+  | { kind: "tool_result"; toolCallId: string; isError: boolean }
+  | { kind: "retry"; attempt: number; maxAttempts: number }
+  | { kind: "files_uploaded"; paths: string[] }
+  | { kind: "done"; success: boolean; errorCode?: string; durationMs: number }
+  | { kind: "error"; message: string };
+
+/** Approval request surfaced from the SDK canUseTool callback. */
+export interface ApprovalRequest {
+  route: RouteKey;
+  requesterId: string; // Discord user who triggered the turn
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  toolCallId?: string;
+}
+
+export interface ApprovalDecision {
+  allow: boolean;
+  message?: string;
+  decidedBy?: string;
+}
+
+/**
+ * Discord-side capabilities handed to the Letta layer for a single turn.
+ * Implemented by the Discord layer; consumed by letta/bridge.ts.
+ */
+export interface TurnContext {
+  route: RouteKey;
+  triggerMessageId: string;
+  requesterId: string;
+  /** Called for every normalized event, in order. Must not throw. */
+  onEvent: (event: TurnEvent) => void;
+  /** Ask a human in Discord to approve a tool call. */
+  requestApproval: (req: ApprovalRequest) => Promise<ApprovalDecision>;
+  /**
+   * Builds listener-owned client tools (react, history, send_file...) bound to
+   * this route. Receives a sandbox-file downloader so send_file can pull from
+   * the conversation's sandbox. Return [] to disable.
+   */
+  buildTools: (sandbox: SandboxFiles | null) => AnyAgentTool[];
+}
+
+/** Narrow view of the SDK's managed-sandbox file client. */
+export interface SandboxFiles {
+  uploadFiles(files: { name: string; data: Blob }[]): Promise<{ files: { path: string; name: string; size: number }[] }>;
+  downloadFile(path: string): Promise<Uint8Array>;
+}
+
+/** The Letta layer's public surface, consumed by the Discord layer. */
+export interface AgentBridge {
+  /**
+   * Run one turn for a batch of inbound messages on this route. Turns on the
+   * same route are serialized by the bridge; messages arriving while a turn is
+   * running are queued and merged into the next turn.
+   */
+  submit(batch: InboundMessage[], ctx: TurnContext): Promise<void>;
+  /** Abort the in-flight turn on this route, if any. Returns true if aborted. */
+  cancel(route: RouteKey): Promise<boolean>;
+  /** Forget the route -> conversation mapping so the next message starts fresh. */
+  reset(route: RouteKey): Promise<void>;
+  /** Safe, user-visible status (no ids unless admin=true). */
+  status(route: RouteKey, admin: boolean): Promise<RouteStatus>;
+  shutdown(): Promise<void>;
+}
+
+export interface RouteStatus {
+  busy: boolean;
+  queued: number;
+  hasConversation: boolean;
+  conversationId?: string; // admin only
+  model?: string; // admin only
+  lastActiveAt?: string;
+}
+
+export type { SendMessage };
