@@ -138,7 +138,7 @@ describe("helpers", () => {
     const { files } = await collectAttachments(cfg(), m, fetcher, transcriber);
     expect(seen).toEqual(["voice-message.ogg:audio/ogg:3", "song.mp3:audio/mpeg:3"]);
     const [voice, song, notes] = files;
-    expect(voice).toMatchObject({ name: "voice-message.ogg", voice: true, durationSecs: 4.1, transcript: "hello <there>" });
+    expect(voice).toMatchObject({ name: "voice-message.ogg", voice: true, durationSecs: 4.1, transcript: "hello <there>", transcriptProvider: "groq", transcriptModel: "whisper-large-v3-turbo" });
     expect(song!.transcript).toBeUndefined();
     expect(song!.transcriptError).toContain("groq HTTP 400");
     expect(song!.data).toBeDefined();

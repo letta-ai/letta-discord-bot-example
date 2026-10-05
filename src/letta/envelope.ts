@@ -38,6 +38,8 @@ export interface UploadedAttachment {
   voice?: boolean;
   durationSecs?: number;
   transcript?: string;
+  transcriptProvider?: string;
+  transcriptModel?: string;
   transcriptError?: string;
 }
 
@@ -80,7 +82,7 @@ export function buildEnvelopeText(batch: InboundMessage[], attachments: Uploaded
           voice: a.voice ? "true" : undefined,
           duration_secs: a.durationSecs,
           transcript_error: a.transcriptError,
-        })}${a.transcript !== undefined ? `><transcript>${escapeXml(a.transcript)}</transcript></attachment>` : "/>"}`,
+        })}${a.transcript !== undefined ? `><transcript ${attrs({ auto: "true", provider: a.transcriptProvider, model: a.transcriptModel })}>${escapeXml(a.transcript)}</transcript></attachment>` : "/>"}`,
       );
     }
   }

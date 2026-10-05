@@ -246,6 +246,8 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
           ...(f.voice ? { voice: true } : {}),
           ...(f.durationSecs !== undefined ? { durationSecs: f.durationSecs } : {}),
           ...(f.transcript !== undefined ? { transcript: f.transcript } : {}),
+          ...(f.transcriptProvider ? { transcriptProvider: f.transcriptProvider } : {}),
+          ...(f.transcriptModel ? { transcriptModel: f.transcriptModel } : {}),
           ...(f.transcriptError ? { transcriptError: f.transcriptError } : {}),
         };
         const safeName = `${m.messageId}-${f.name.replace(/[^\w.\-]+/g, "_")}`;

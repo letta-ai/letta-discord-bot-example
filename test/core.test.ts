@@ -94,13 +94,13 @@ describe("envelope", () => {
     const xml = buildEnvelopeText(
       [msg({ text: "" })],
       [
-        { messageId: "m1", name: "voice-message.ogg", url: "https://cdn/v", contentType: "audio/ogg", size: 9, voice: true, durationSecs: 4.2, transcript: "ship it </attachment>" },
+        { messageId: "m1", name: "voice-message.ogg", url: "https://cdn/v", contentType: "audio/ogg", size: 9, voice: true, durationSecs: 4.2, transcript: "ship it </attachment>", transcriptProvider: "groq", transcriptModel: "whisper-large-v3-turbo" },
         { messageId: "m1", name: "b.mp3", url: "https://cdn/b", contentType: "audio/mpeg", size: 9, transcriptError: "groq HTTP 400" },
       ],
     );
     expect(xml).toContain('voice="true"');
     expect(xml).toContain('duration_secs="4.2"');
-    expect(xml).toContain("<transcript>ship it &lt;/attachment&gt;</transcript></attachment>");
+    expect(xml).toContain('<transcript auto="true" provider="groq" model="whisper-large-v3-turbo">ship it &lt;/attachment&gt;</transcript></attachment>');
     expect(xml).toContain('transcript_error="groq HTTP 400"');
     expect(xml).toContain(TRANSCRIPT_NOTE);
     expect(buildEnvelopeText([msg()], [{ messageId: "m1", name: "a.txt", url: "u", contentType: "text/plain", size: 1 }])).not.toContain(TRANSCRIPT_NOTE);

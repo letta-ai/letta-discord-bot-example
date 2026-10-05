@@ -7,7 +7,7 @@ const VOICE_MESSAGE_FLAG = 1 << 13; // MessageFlags.IsVoiceMessage
 
 /** Anything that can turn audio into text (see src/transcribe). */
 export interface TranscriberLike {
-  transcribe(input: TranscribeInput): Promise<{ text: string }>;
+  transcribe(input: TranscribeInput): Promise<{ text: string; provider?: string; model?: string }>;
 }
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -161,6 +161,8 @@ export async function collectAttachments(
             contentType: a.contentType ?? "application/octet-stream",
           });
           file.transcript = out.text.trim();
+          if (out.provider) file.transcriptProvider = out.provider;
+          if (out.model) file.transcriptModel = out.model;
         } catch (err) {
           file.transcriptError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
           log.warn("transcription failed", { name: a.name, err: file.transcriptError });

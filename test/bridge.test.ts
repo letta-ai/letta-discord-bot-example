@@ -171,10 +171,10 @@ describe("bridge", () => {
   test("passes voice transcripts through to the envelope", async () => {
     const { client, calls } = fakeClient(() => ok("heard you"));
     const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
-    const file = { name: "voice-message.ogg", url: "https://cdn/v", contentType: "audio/ogg", size: 3, data: new Blob(["ogg"]), voice: true, durationSecs: 2, transcript: "deploy the thing" };
+    const file = { name: "voice-message.ogg", url: "https://cdn/v", contentType: "audio/ogg", size: 3, data: new Blob(["ogg"]), voice: true, durationSecs: 2, transcript: "deploy the thing", transcriptProvider: "groq", transcriptModel: "whisper-large-v3-turbo" };
     await bridge.submit([inbound("m1", "", [file])], ctxCollector().ctx);
     expect(String(calls.sends[0])).toContain('voice="true"');
-    expect(String(calls.sends[0])).toContain("<transcript>deploy the thing</transcript>");
+    expect(String(calls.sends[0])).toContain('<transcript auto="true" provider="groq" model="whisper-large-v3-turbo">deploy the thing</transcript>');
   });
 
   test("retries once after a session failure before any text", async () => {

@@ -45,6 +45,8 @@ export interface InboundFile {
   voice?: boolean; // Discord voice message
   durationSecs?: number;
   transcript?: string; // speech-to-text result for audio
+  transcriptProvider?: string;
+  transcriptModel?: string;
   transcriptError?: string;
 }
 
