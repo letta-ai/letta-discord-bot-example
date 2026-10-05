@@ -20,3 +20,17 @@ describe("toolLabel", () => {
     expect(l.endsWith("...")).toBe(true);
   });
 });
+
+import { assistantMessageId } from "../src/letta/bridge.ts";
+
+describe("assistantMessageId", () => {
+  test("uses the server message id", () => {
+    expect(assistantMessageId({ uuid: "message-abc", otid: "o1" })).toBe("message-abc");
+  });
+  test("ignores SDK-generated per-chunk uuids and falls back to otid", () => {
+    expect(assistantMessageId({ uuid: "session-7", otid: "o1" })).toBe("otid:o1");
+  });
+  test("undefined when neither is stable", () => {
+    expect(assistantMessageId({ uuid: "session-7" })).toBeUndefined();
+  });
+});

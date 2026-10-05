@@ -69,6 +69,17 @@ export function toolLabel(name: string, input: Record<string, unknown>): string 
   return oneLine.length > 100 ? `${oneLine.slice(0, 97)}...` : oneLine;
 }
 
+/**
+ * Stable id for one assistant message, used to split the reply into separate
+ * Discord messages. The SDK sets `uuid` to the server message id when present
+ * but otherwise generates a new one per chunk, so only trust server ids
+ * (`message-...`) and fall back to `otid`; undefined means "same message".
+ */
+export function assistantMessageId(msg: { uuid?: string; otid?: string | null }): string | undefined {
+  if (typeof msg.uuid === "string" && msg.uuid.startsWith("message-")) return msg.uuid;
+  return typeof msg.otid === "string" && msg.otid ? `otid:${msg.otid}` : undefined;
+}
+
 export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentBridge {
   const client: LettaClientLike =
     deps.client ??
@@ -269,7 +280,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       case "assistant":
         if (msg.content) {
           seenText.v = true;
-          emit({ kind: "assistant_delta", text: msg.content });
+          emit({ kind: "assistant_delta", text: msg.content, messageId: assistantMessageId(msg) });
         }
         return false;
       case "reasoning":

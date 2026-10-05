@@ -99,6 +99,58 @@ describe("TurnRenderer", () => {
     expect(channel.typing).toBeGreaterThanOrEqual(1);
   });
 
+  test("posts each assistant message as it finalizes instead of smushing them together", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config({ STREAM_EDITS: false }), channel, triggerMessage: trigger });
+    const texts = () => channel.sent.map((m) => m.content).filter((c) => !c.startsWith("-#"));
+
+    renderer.onEvent({ kind: "started", conversationId: "c", createdConversation: false });
+    renderer.onEvent({ kind: "assistant_delta", text: "Not saved locally, ", messageId: "message-a" });
+    renderer.onEvent({ kind: "assistant_delta", text: "so I'll fetch it.", messageId: "message-a" });
+    renderer.onEvent({ kind: "tool_call", toolCallId: "t1", toolName: "Bash", summary: "Download the video" });
+    await new Promise((r) => setTimeout(r, 20));
+    // The first message is posted when the tool call ends it, before the turn finishes.
+    expect(texts()).toEqual(["Not saved locally, so I'll fetch it."]);
+
+    renderer.onEvent({ kind: "tool_result", toolCallId: "t1", isError: false });
+    renderer.onEvent({ kind: "assistant_delta", text: "Yes. ", messageId: "message-b" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Downloaded it.", messageId: "message-b" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Second thought.", messageId: "message-c" });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+
+    expect(texts()).toEqual(["Not saved locally, so I'll fetch it.", "Yes. Downloaded it.", "Second thought."]);
+    expect(trigger.reacted).toEqual(["✅"]);
+  });
+
+  test("deltas without a message id continue the current message", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config({ STREAM_EDITS: false }), channel, triggerMessage: trigger });
+    renderer.onEvent({ kind: "assistant_delta", text: "one ", messageId: "message-a" });
+    renderer.onEvent({ kind: "assistant_delta", text: "two" });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+    expect(channel.sent.map((m) => m.content)).toEqual(["one two"]);
+  });
+
+  test("streaming mode also starts a new Discord message per assistant message", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({
+      config: config({ STREAM_EDITS: true, STREAM_EDIT_INTERVAL_MS: 0 }),
+      channel,
+      triggerMessage: trigger,
+    });
+    renderer.onEvent({ kind: "assistant_delta", text: "first", messageId: "message-a" });
+    await new Promise((r) => setTimeout(r, 10));
+    renderer.onEvent({ kind: "assistant_delta", text: "second", messageId: "message-b" });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+    expect(channel.sent.map((m) => m.content)).toEqual(["first", "second"]);
+  });
+
   test("with stream edits disabled, posts the full reply once with no edits", async () => {
     const channel = new FakeChannel(true);
     const trigger = new FakeMessage();

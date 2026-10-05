@@ -63,11 +63,11 @@ export class TurnRenderer {
   private typingTimer: ReturnType<typeof setInterval> | null = null;
 
   // reply text
-  private text = "";
-  private messages: { msg: RenderMessage; content: string }[] = [];
+  // One segment per assistant message; each becomes its own Discord message(s).
+  private seg: Segment = newSegment();
+  private postedText = false; // any assistant text has been posted this turn
   private textTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTextSync = 0;
-  private firstSyncQueued = false;
   private postedAny = false; // any message (text or failure) has replied to the trigger
 
   // status line
@@ -107,7 +107,9 @@ export class TurnRenderer {
         return;
       case "assistant_delta":
         if (!e.text) return;
-        this.text += e.text;
+        if (e.messageId && this.seg.id && e.messageId !== this.seg.id) this.endSegment();
+        if (e.messageId && !this.seg.id) this.seg.id = e.messageId;
+        this.seg.text += e.text;
         if (this.config.STREAM_EDITS) this.scheduleTextSync();
         return;
       case "reasoning_delta":
@@ -117,6 +119,7 @@ export class TurnRenderer {
         return;
       case "tool_call":
         this.toolIds.add(e.toolCallId);
+        this.endSegment();
         if (!this.config.SHOW_TOOL_STATUS) return;
         this.toolLine = `-# ${e.summary || e.toolName}`;
         this.reasoning = "";
@@ -184,20 +187,31 @@ export class TurnRenderer {
 
   // ---- reply text ---------------------------------------------------------
 
+  /** Finalize the current assistant message: post it now and start a fresh segment. */
+  private endSegment(): void {
+    const done = this.seg;
+    if (!done.text) return;
+    if (this.textTimer) clearTimeout(this.textTimer);
+    this.textTimer = null;
+    this.enqueue(() => this.syncText(done));
+    this.seg = newSegment();
+  }
+
   private scheduleTextSync(): void {
-    if (!this.firstSyncQueued) {
+    const seg = this.seg;
+    if (!seg.firstSyncQueued) {
       // First visible text goes out immediately.
-      if (splitForDiscord(this.text).length === 0) return;
-      this.firstSyncQueued = true;
+      if (splitForDiscord(seg.text).length === 0) return;
+      seg.firstSyncQueued = true;
       this.lastTextSync = Date.now();
-      this.enqueue(() => this.syncText());
+      this.enqueue(() => this.syncText(seg));
       return;
     }
     if (this.textTimer) return;
     const wait = Math.max(0, this.lastTextSync + this.interval() - Date.now());
     this.textTimer = setTimeout(() => {
       this.textTimer = null;
-      if (!this.ended) this.enqueue(() => this.syncText());
+      if (!this.ended) this.enqueue(() => this.syncText(seg));
     }, wait);
   }
 
@@ -206,12 +220,12 @@ export class TurnRenderer {
    * Earlier chunks are stable once the text has grown past them, so this
    * finalizes full messages and continues in a new one. Idempotent.
    */
-  private async syncText(): Promise<void> {
+  private async syncText(seg: Segment): Promise<void> {
     this.lastTextSync = Date.now();
-    const chunks = renderChunks(this.text);
+    const chunks = renderChunks(seg.text);
     for (let i = 0; i < chunks.length; i++) {
       const content = chunks[i]!;
-      const existing = this.messages[i];
+      const existing = seg.messages[i];
       if (existing) {
         if (existing.content !== content) {
           await existing.msg.edit({ content, allowedMentions: NO_MENTIONS });
@@ -219,12 +233,13 @@ export class TurnRenderer {
         }
       } else {
         const msg = await this.post(content);
-        this.messages.push({ msg, content });
+        seg.messages.push({ msg, content });
+        this.postedText = true;
       }
     }
     // Defensive: drop any surplus messages if the split shrank.
-    while (this.messages.length > chunks.length) {
-      const extra = this.messages.pop()!;
+    while (seg.messages.length > chunks.length) {
+      const extra = seg.messages.pop()!;
       await extra.msg.delete().catch(() => {});
     }
   }
@@ -296,18 +311,19 @@ export class TurnRenderer {
     const interrupted = e.errorCode === "interrupted";
 
     // Deliver whatever text we have (also partial text on failure/interrupt).
-    this.enqueue(() => this.syncText());
+    const last = this.seg;
+    this.enqueue(() => this.syncText(last));
 
     if (!e.success && !interrupted) {
       this.enqueue(async () => {
-        if (this.messages.length === 0) await this.post(FAILURE_TEXT);
+        if (!this.postedText) await this.post(FAILURE_TEXT);
       });
     }
 
     this.enqueue(async () => {
       if (!this.statusMsg) return;
       const n = this.toolIds.size;
-      if (this.messages.length > 0 || n === 0) {
+      if (this.postedText || n === 0) {
         await this.statusMsg.delete().catch(() => {});
       } else {
         await this.statusMsg.edit({ content: `-# Used ${n} tool${n === 1 ? "" : "s"}`, allowedMentions: NO_MENTIONS });
@@ -320,6 +336,17 @@ export class TurnRenderer {
 
     this.enqueue(async () => this.resolveFinished());
   }
+}
+
+interface Segment {
+  id?: string;
+  text: string;
+  messages: { msg: RenderMessage; content: string }[];
+  firstSyncQueued: boolean;
+}
+
+function newSegment(): Segment {
+  return { text: "", messages: [], firstSyncQueued: false };
 }
 
 function renderChunks(text: string): string[] {

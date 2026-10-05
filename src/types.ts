@@ -47,7 +47,7 @@ export interface InboundFile {
 /** Normalized events emitted while a turn runs. */
 export type TurnEvent =
   | { kind: "started"; conversationId: string; createdConversation: boolean }
-  | { kind: "assistant_delta"; text: string } // append-only fragment
+  | { kind: "assistant_delta"; text: string; messageId?: string } // append-only fragment; messageId marks message boundaries
   | { kind: "reasoning_delta"; text: string }
   | { kind: "tool_call"; toolCallId: string; toolName: string; summary: string }
   | { kind: "tool_result"; toolCallId: string; isError: boolean }
