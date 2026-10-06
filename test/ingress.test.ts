@@ -39,8 +39,11 @@ describe("gate", () => {
     expect(gate(cfg(), msg({ mentioned: false }), deps())).toMatchObject({ accept: false, reason: "not-mentioned" });
   });
 
-  test("open channels need no mention", () => {
-    expect(gate(cfg({ DISCORD_OPEN_CHANNEL_IDS: "c1" }), msg({ mentioned: false }), deps()).accept).toBe(true);
+  test("open channels need no mention and never auto-thread", () => {
+    const open = cfg({ DISCORD_OPEN_CHANNEL_IDS: "c1" });
+    const route = { guildId: "g1", channelId: "c1", threadId: null };
+    expect(gate(open, msg({ mentioned: false }), deps())).toMatchObject({ accept: true, needsThread: false, route });
+    expect(gate(open, msg(), deps())).toMatchObject({ accept: true, needsThread: false, route });
   });
 
   test("threads: known bot threads need no mention, route uses parent + thread", () => {

@@ -39,7 +39,7 @@ Routing
 - Guild mention in a non-thread channel with `AUTO_THREAD=true`: create a public thread from the triggering message
   (name: first ~60 chars of text, fallback `Chat with <bot>`), route = that thread.
 - Message inside a thread: route = thread. In threads the bot created/has a conversation for, no mention needed.
-- `DISCORD_OPEN_CHANNEL_IDS`: respond to every message without mention (route = channel unless AUTO_THREAD).
+- `DISCORD_OPEN_CHANNEL_IDS`: respond to every message without mention. Route = channel; open channels never auto-thread.
 - DMs: `DM_POLICY` off | allowlist (DISCORD_ALLOWED_USER_IDS + admins) | open. Route = DM channel.
 - Guilds: a non-empty `DISCORD_ALLOWED_USER_IDS` limits replies to those users and admins; empty = everyone.
 - Ignore own messages always; other bots unless `RESPOND_TO_BOTS`.

@@ -124,7 +124,9 @@ export function gate(config: Config, msg: IngressMessage, deps: GateDeps): GateD
   }
 
   if (!mentioned && !open) return { accept: false, reason: "not-mentioned" };
-  const needsThread = config.AUTO_THREAD;
+  // Open channels answer every message, so the channel itself is the route;
+  // a thread (and a conversation and sandbox) per message would be noise.
+  const needsThread = config.AUTO_THREAD && !open;
   return {
     accept: true,
     route: { guildId: msg.guildId, channelId: msg.channel.id, threadId: null },
