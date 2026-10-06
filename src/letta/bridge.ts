@@ -80,6 +80,17 @@ export function assistantMessageId(msg: { uuid?: string; otid?: string | null })
   return typeof msg.otid === "string" && msg.otid ? `otid:${msg.otid}` : undefined;
 }
 
+/**
+ * True when the error says the Letta conversation itself is gone. Other
+ * "not found" errors (a missing computer, sandbox or agent) must not detach the
+ * route from its conversation.
+ */
+export function isConversationMissing(err: unknown, conversationId: string): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!/not found|\b404\b/i.test(message)) return false;
+  return /conversation/i.test(message) || message.includes(conversationId);
+}
+
 /** Options for the SDK's cloud client. */
 export function clientOptions(config: Config) {
   return {
@@ -226,7 +237,13 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       ...(config.TOOLSET_BASE ? { toolset: { base: config.TOOLSET_BASE } } : {}),
     };
     const session = client.resumeSession(conversationId, options);
-    const info = await session.ready();
+    const info = await session.ready().catch((err: unknown) => {
+      // Never pooled in s.session, so nothing else would close it.
+      try {
+        session.close();
+      } catch {}
+      throw err;
+    });
     sandboxRef = (session.sandbox as SandboxFiles | undefined) ?? null;
     s.model = info.model;
     s.session = session;
@@ -287,12 +304,16 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     return out;
   }
 
-  /** Map one SDK message to zero or more normalized events. Returns true on terminal result. */
-  function mapMessage(msg: SDKMessage, emit: (e: TurnEvent) => void, seenText: { v: boolean }): boolean {
+  /**
+   * Map one SDK message to zero or more normalized events. Returns true on terminal result.
+   * `acted` is set once the agent has produced text or touched a tool, after
+   * which the turn must not be resent.
+   */
+  function mapMessage(msg: SDKMessage, emit: (e: TurnEvent) => void, acted: { v: boolean }): boolean {
     switch (msg.type) {
       case "assistant":
         if (msg.content) {
-          seenText.v = true;
+          acted.v = true;
           emit({ kind: "assistant_delta", text: msg.content, messageId: assistantMessageId(msg) });
         }
         return false;
@@ -300,6 +321,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         if (msg.content) emit({ kind: "reasoning_delta", text: msg.content });
         return false;
       case "tool_call":
+        acted.v = true;
         emit({
           kind: "tool_call",
           toolCallId: msg.toolCallId,
@@ -308,6 +330,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         });
         return false;
       case "tool_result":
+        acted.v = true;
         emit({ kind: "tool_result", toolCallId: msg.toolCallId, isError: msg.isError });
         return false;
       case "retry":
@@ -339,7 +362,15 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     };
     s.current = ctx;
     s.aborted = false;
-    const seenText = { v: false };
+    const acted = { v: false };
+    /** /cancel or /new arrived while the turn was still setting up: stop before anything is sent. */
+    const interruptedDuringSetup = () => {
+      if (!s.aborted) return false;
+      // /new also cleared the conversation, so a session bound to the old one must not be reused.
+      if (!s.conversationId) closeSession(s, "reset");
+      emit({ kind: "done", success: false, errorCode: "interrupted", durationMs: 0 });
+      return true;
+    };
     // Signal the turn immediately so Discord shows typing while the
     // conversation and sandbox spin up (session start can take 10s+).
     emit({ kind: "started", conversationId: s.conversationId ?? "", createdConversation: !s.conversationId });
@@ -347,11 +378,13 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       try {
         await ensureConversation(s, ctx);
         const session = await ensureSession(s);
+        if (interruptedDuringSetup()) return;
         const attachments = await uploadFiles(s, session, batch, emit);
+        if (interruptedDuringSetup()) return;
         await session.send(buildSendMessage(batch, attachments));
         let terminal = false;
         for await (const msg of session.stream()) {
-          if (mapMessage(msg, emit, seenText)) {
+          if (mapMessage(msg, emit, acted)) {
             terminal = true;
             break;
           }
@@ -370,12 +403,12 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         const message = err instanceof Error ? err.message : String(err);
         log.warn("turn failed", { route: s.key, attempt, err: message });
         closeSession(s, "error");
-        if (/not found|404/i.test(message) && s.conversationId) {
+        if (s.conversationId && isConversationMissing(err, s.conversationId)) {
           // Conversation was deleted on the Letta side; start fresh next attempt.
           store.delete(s.key);
           s.conversationId = null;
         }
-        if (attempt === 2 || seenText.v || s.aborted || shuttingDown) {
+        if (attempt === 2 || acted.v || s.aborted || shuttingDown) {
           emit({ kind: "error", message });
           emit({ kind: "done", success: false, errorCode: s.aborted ? "interrupted" : "error", durationMs: 0 });
           return;
@@ -422,8 +455,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       const s = routes.get(routeKeyString(route));
       if (!s) return false;
       const hadQueue = dropQueue(s) > 0;
-      if (!s.busy || !s.session) return hadQueue;
+      if (!s.busy) return hadQueue;
       s.aborted = true;
+      // Still creating the conversation or sandbox: runTurn stops before sending.
+      if (!s.session) return true;
       try {
         await s.session.abort();
       } catch (err) {
@@ -437,9 +472,9 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       const s = routes.get(key);
       if (s) {
         dropQueue(s);
-        if (s.busy && s.session) {
+        if (s.busy) {
           s.aborted = true;
-          await s.session.abort().catch(() => {});
+          if (s.session) await s.session.abort().catch(() => {});
         }
         closeSession(s, "reset");
         s.conversationId = null;

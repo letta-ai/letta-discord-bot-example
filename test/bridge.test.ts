@@ -31,7 +31,7 @@ function inbound(id: string, text: string, files: InboundMessage["files"] = []):
 
 type Script = (sent: unknown, n: number) => SDKMessage[] | Error;
 
-function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean } = {}) {
+function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean; readyGate?: Promise<void> } = {}) {
   const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any };
   let readyFails = opts.failReadyOnce ? 1 : 0;
   const client: LettaClientLike = {
@@ -57,6 +57,7 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
           },
         },
         async ready() {
+          if (opts.readyGate) await opts.readyGate;
           if (readyFails > 0) {
             readyFails--;
             throw new Error("socket closed");
@@ -72,6 +73,8 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
         async *stream() {
           while (queue.length) {
             const next = queue.shift()!;
+            // simulate the stream dying mid-turn
+            if ((next as { type: string }).type === "throw") throw new Error("stream died");
             yield next;
             if (next.type === "result") return;
           }
@@ -183,7 +186,41 @@ describe("bridge", () => {
     const c = ctxCollector();
     await bridge.submit([inbound("m1", "hi")], c.ctx);
     expect(calls.resumes).toBe(2);
+    // The session whose ready() failed was never pooled, so it must be closed here.
+    expect(calls.closes).toBe(1);
     expect(c.events.at(-1)).toMatchObject({ kind: "done", success: true });
+  });
+
+  test("does not resend the message after a tool call already ran", async () => {
+    const { client, calls } = fakeClient(() => [
+      { type: "tool_call", toolCallId: "t1", toolName: "Bash", toolInput: { command: "deploy" } } as unknown as SDKMessage,
+      { type: "throw" } as unknown as SDKMessage,
+    ]);
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const c = ctxCollector();
+    await bridge.submit([inbound("m1", "deploy it")], c.ctx);
+    expect(calls.sends).toHaveLength(1);
+    expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "error" });
+  });
+
+  test("an unrelated 'not found' error keeps the route's conversation", async () => {
+    const { client, calls } = fakeClient(() => new Error("Computer not found: build-box"));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const c = ctxCollector();
+    await bridge.submit([inbound("m1", "hi")], c.ctx);
+    expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false });
+    expect(calls.creates).toBe(1);
+    expect((await bridge.status(route, true)).conversationId).toBe("conv-1");
+  });
+
+  test("a conversation deleted in Letta is replaced on retry", async () => {
+    const { client, calls } = fakeClient((_sent, n) => (n === 1 ? new Error("404 Conversation conv-1 not found") : ok("fresh")));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const c = ctxCollector();
+    await bridge.submit([inbound("m1", "hi")], c.ctx);
+    expect(c.events.at(-1)).toMatchObject({ kind: "done", success: true });
+    expect(calls.creates).toBe(2);
+    expect((await bridge.status(route, true)).conversationId).toBe("conv-2");
   });
 
   test("reports error after two failures", async () => {
@@ -246,6 +283,43 @@ describe("bridge", () => {
     await p;
     expect(calls.aborts).toBe(1);
     expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "interrupted" });
+  });
+
+  test("cancel during session setup stops the turn before anything is sent", async () => {
+    let open!: () => void;
+    const readyGate = new Promise<void>((r) => (open = r));
+    const { client, calls } = fakeClient(() => ok("never sent"), { readyGate });
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const c = ctxCollector();
+    const p = bridge.submit([inbound("m1", "hi")], c.ctx);
+    while (calls.resumes === 0) await new Promise((r) => setTimeout(r, 1));
+    expect(await bridge.cancel(route)).toBe(true);
+    open();
+    await p;
+    expect(calls.sends).toHaveLength(0);
+    expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "interrupted" });
+  });
+
+  test("reset during session setup drops the session bound to the old conversation", async () => {
+    let open!: () => void;
+    const readyGate = new Promise<void>((r) => (open = r));
+    const { client, calls } = fakeClient(() => ok("hello"), { readyGate });
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const first = ctxCollector("m1");
+    const p = bridge.submit([inbound("m1", "hi")], first.ctx);
+    while (calls.resumes === 0) await new Promise((r) => setTimeout(r, 1));
+    await bridge.reset(route);
+    open();
+    await p;
+    expect(calls.sends).toHaveLength(0);
+    expect(calls.closes).toBe(1);
+    expect(first.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "interrupted" });
+
+    const second = ctxCollector("m2");
+    await bridge.submit([inbound("m2", "again")], second.ctx);
+    expect(calls.creates).toBe(2);
+    expect(calls.resumes).toBe(2);
+    expect(second.events.at(-1)).toMatchObject({ kind: "done", success: true });
   });
 
   test("cancel settles queued turns with interrupted", async () => {
