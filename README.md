@@ -210,6 +210,10 @@ preview of its input, plus Approve and Deny buttons.
 
 Anything not decided within `APPROVAL_TIMEOUT_SECONDS` is denied.
 
+The default `admins` mode needs at least one id in `DISCORD_ADMIN_USER_IDS` or
+`DISCORD_ADMIN_ROLE_IDS`. With neither set nobody can click, so every request times out.
+`bun run doctor` and the startup log both warn about this.
+
 ## 🔧 Discord tools
 
 With `ENABLE_DISCORD_TOOLS=true` the agent gets four tools that run in the listener process, not in

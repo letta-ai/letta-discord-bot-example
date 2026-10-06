@@ -447,6 +447,20 @@ export async function checkTranscription(fetchImpl: DoctorFetch, config: Config)
   }
 }
 
+/** APPROVAL_MODE=admins with no admins means every approval request times out. */
+export function checkApprovers(config: Config): CheckResult {
+  const noAdmins = config.DISCORD_ADMIN_USER_IDS.length === 0 && config.DISCORD_ADMIN_ROLE_IDS.length === 0;
+  if (config.APPROVAL_MODE === "admins" && noAdmins) {
+    return result(
+      "WARN",
+      "Approvals",
+      "APPROVAL_MODE=admins but no admin users or roles are configured, so nobody can approve tool calls",
+      "Set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS, or choose another APPROVAL_MODE.",
+    );
+  }
+  return result("PASS", "Approvals", `APPROVAL_MODE=${config.APPROVAL_MODE}`, "No action needed.");
+}
+
 export async function checkDataDir(dataDir: string): Promise<CheckResult> {
   const directory = resolve(dataDir);
   const path = join(directory, `.doctor-${randomUUID()}.tmp`);
@@ -497,7 +511,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<CheckResul
     return redactResults(configFailure(error), env);
   }
 
-  const results: CheckResult[] = [result("PASS", "Config", "configuration is valid", "No action needed.")];
+  const results: CheckResult[] = [result("PASS", "Config", "configuration is valid", "No action needed."), checkApprovers(config)];
   const token = await checkDiscordToken(fetchImpl, config.DISCORD_BOT_TOKEN);
   results.push(token.check);
   const application = await checkDiscordApplication(fetchImpl, config.DISCORD_BOT_TOKEN);

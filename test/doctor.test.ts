@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PermissionFlagsBits } from "discord.js";
 import { loadConfig } from "../src/config.ts";
 import {
+  checkApprovers,
   checkLetta,
   checkMessageContentIntent,
   computeEffectivePermissions,
@@ -32,6 +33,21 @@ describe("doctor Message Content intent", () => {
     const check = checkMessageContentIntent(0);
     expect(check.status).toBe("FAIL");
     expect(check.hint).toContain("Developer Portal");
+  });
+});
+
+describe("doctor approvers", () => {
+  test("warns when APPROVAL_MODE=admins has nobody who can approve", () => {
+    const check = checkApprovers(config());
+    expect(check.status).toBe("WARN");
+    expect(check.hint).toContain("DISCORD_ADMIN_USER_IDS");
+  });
+
+  test("passes with an admin user or role, or another mode", () => {
+    expect(checkApprovers(config({ DISCORD_ADMIN_USER_IDS: "1" })).status).toBe("PASS");
+    expect(checkApprovers(config({ DISCORD_ADMIN_ROLE_IDS: "2" })).status).toBe("PASS");
+    expect(checkApprovers(config({ APPROVAL_MODE: "requester" })).status).toBe("PASS");
+    expect(checkApprovers(config({ APPROVAL_MODE: "deny" })).status).toBe("PASS");
   });
 });
 

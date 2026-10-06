@@ -10,6 +10,12 @@ async function main() {
   const config = loadConfig();
   setLogLevel(config.LOG_LEVEL);
 
+  if (config.APPROVAL_MODE === "admins" && config.DISCORD_ADMIN_USER_IDS.length === 0 && config.DISCORD_ADMIN_ROLE_IDS.length === 0) {
+    log.warn("APPROVAL_MODE=admins but no admins are configured; tool approvals will time out", {
+      hint: "set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS",
+    });
+  }
+
   const store = new RouteStore(config.DATA_DIR);
   const client = createDiscordClient();
   const bridge = createAgentBridge(config, {
