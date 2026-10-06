@@ -83,6 +83,7 @@ Approvals (`APPROVAL_MODE`)
 
 Slash commands (listener-local only, never harness control)
 - `/new` reset route, `/cancel` abort turn, `/status` (ids only for admins, ephemeral), `/help`.
+- `/new`, `/cancel` and `/status` pass the same `surfaceDenial` check as messages (user, guild, channel, DM policy).
 - No `/model`, `/reload`, permission changes, or anything that changes the agent.
 
 Runtime

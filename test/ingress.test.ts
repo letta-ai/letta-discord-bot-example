@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.ts";
-import { Debouncer, Deduper, collectAttachments, gate, stripMention, threadName, type IngressMessage } from "../src/discord/ingress.ts";
+import { Debouncer, Deduper, collectAttachments, gate, stripMention, surfaceDenial, threadName, type IngressMessage } from "../src/discord/ingress.ts";
 
 const BOT = "999";
 const base = { DISCORD_BOT_TOKEN: "x", LETTA_API_KEY: "y", LETTA_AGENT_ID: "agent-1" };
@@ -68,6 +68,29 @@ describe("gate", () => {
       route: { guildId: null, channelId: "d1", threadId: null },
     });
     expect(gate(cfg({ DM_POLICY: "open" }), dm, deps()).accept).toBe(true);
+  });
+});
+
+describe("surfaceDenial", () => {
+  const guild = { userId: "u1", guildId: "g1", channelId: "c1", isDM: false };
+  const dm = { userId: "u1", guildId: null, channelId: "d1", isDM: true };
+
+  test("guild surfaces apply the user, guild and channel allowlists", () => {
+    expect(surfaceDenial(cfg(), guild)).toBeNull();
+    expect(surfaceDenial(cfg({ DISCORD_ALLOWED_USER_IDS: "u2" }), guild)).toBe("user-not-allowed");
+    expect(surfaceDenial(cfg({ DISCORD_ALLOWED_USER_IDS: "u2", DISCORD_ADMIN_USER_IDS: "u1" }), guild)).toBeNull();
+    expect(surfaceDenial(cfg({ DISCORD_GUILD_IDS: "g2" }), guild)).toBe("guild-not-allowed");
+    expect(surfaceDenial(cfg({ DISCORD_CHANNEL_IDS: "c2" }), guild)).toBe("channel-not-allowed");
+    // A thread is allowed through its parent channel.
+    expect(surfaceDenial(cfg({ DISCORD_CHANNEL_IDS: "c1" }), { ...guild, channelId: "t1", parentId: "c1" })).toBeNull();
+  });
+
+  test("DM surfaces apply DM_POLICY only", () => {
+    expect(surfaceDenial(cfg({ DM_POLICY: "off" }), dm)).toBe("dm-off");
+    expect(surfaceDenial(cfg(), dm)).toBe("dm-not-allowlisted");
+    expect(surfaceDenial(cfg({ DISCORD_ALLOWED_USER_IDS: "u1" }), dm)).toBeNull();
+    expect(surfaceDenial(cfg({ DISCORD_ADMIN_USER_IDS: "u1" }), dm)).toBeNull();
+    expect(surfaceDenial(cfg({ DM_POLICY: "open", DISCORD_GUILD_IDS: "g2", DISCORD_CHANNEL_IDS: "c2" }), dm)).toBeNull();
   });
 });
 

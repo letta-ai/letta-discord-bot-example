@@ -51,6 +51,39 @@ export function isAdminUser(config: Config, userId: string, roles?: { has(id: st
   return false;
 }
 
+/** Who is acting and where. Shared by message gating and slash commands. */
+export interface Surface {
+  userId: string;
+  roles?: { has(id: string): boolean };
+  guildId: string | null;
+  channelId: string;
+  /** Parent channel when the surface is a thread. */
+  parentId?: string | null;
+  isDM: boolean;
+}
+
+/**
+ * Why this user may not use the bot on this surface, or null when they may.
+ * Applies DM_POLICY in DMs, and the user, guild and channel allowlists in guilds.
+ */
+export function surfaceDenial(config: Config, s: Surface): string | null {
+  const admin = isAdminUser(config, s.userId, s.roles);
+  const listed = config.DISCORD_ALLOWED_USER_IDS.includes(s.userId);
+
+  if (s.isDM) {
+    if (config.DM_POLICY === "off") return "dm-off";
+    if (config.DM_POLICY === "allowlist" && !admin && !listed) return "dm-not-allowlisted";
+    return null;
+  }
+
+  if (!admin && config.DISCORD_ALLOWED_USER_IDS.length > 0 && !listed) return "user-not-allowed";
+  if (config.DISCORD_GUILD_IDS.length && !config.DISCORD_GUILD_IDS.includes(s.guildId ?? "")) return "guild-not-allowed";
+  const parentId = s.parentId ?? s.channelId;
+  if (config.DISCORD_CHANNEL_IDS.length && !config.DISCORD_CHANNEL_IDS.includes(parentId) && !config.DISCORD_CHANNEL_IDS.includes(s.channelId))
+    return "channel-not-allowed";
+  return null;
+}
+
 /** Pure gating: decide whether and where a message routes. */
 export function gate(config: Config, msg: IngressMessage, deps: GateDeps): GateDecision {
   if (msg.author.id === deps.botUserId) return { accept: false, reason: "self" };
@@ -58,17 +91,21 @@ export function gate(config: Config, msg: IngressMessage, deps: GateDeps): GateD
     msg.mentions.users.has(deps.botUserId) || msg.mentions.repliedUser?.id === deps.botUserId;
   if (msg.author.bot && !(config.RESPOND_TO_BOTS && mentioned)) return { accept: false, reason: "bot" };
 
-  const admin = isAdminUser(config, msg.author.id, msg.member?.roles?.cache);
-  const userAllowed =
-    admin || config.DISCORD_ALLOWED_USER_IDS.length === 0 || config.DISCORD_ALLOWED_USER_IDS.includes(msg.author.id);
+  const isDM = msg.channel.isDMBased();
+  const isThread = !isDM && msg.channel.isThread();
+  const parentId = isThread ? (msg.channel.parentId ?? msg.channel.id) : msg.channel.id;
+  const denial = surfaceDenial(config, {
+    userId: msg.author.id,
+    roles: msg.member?.roles?.cache,
+    guildId: msg.guildId,
+    channelId: msg.channel.id,
+    parentId,
+    isDM,
+  });
+  if (denial) return { accept: false, reason: denial };
 
   // Direct messages
-  if (msg.channel.isDMBased()) {
-    if (config.DM_POLICY === "off") return { accept: false, reason: "dm-off" };
-    if (config.DM_POLICY === "allowlist") {
-      const listed = admin || config.DISCORD_ALLOWED_USER_IDS.includes(msg.author.id);
-      if (!listed) return { accept: false, reason: "dm-not-allowlisted" };
-    }
+  if (isDM) {
     return {
       accept: true,
       route: { guildId: null, channelId: msg.channel.id, threadId: null },
@@ -76,15 +113,6 @@ export function gate(config: Config, msg: IngressMessage, deps: GateDeps): GateD
       mentioned,
     };
   }
-
-  if (!userAllowed) return { accept: false, reason: "user-not-allowed" };
-  if (config.DISCORD_GUILD_IDS.length && !config.DISCORD_GUILD_IDS.includes(msg.guildId ?? ""))
-    return { accept: false, reason: "guild-not-allowed" };
-
-  const isThread = msg.channel.isThread();
-  const parentId = isThread ? (msg.channel.parentId ?? msg.channel.id) : msg.channel.id;
-  if (config.DISCORD_CHANNEL_IDS.length && !config.DISCORD_CHANNEL_IDS.includes(parentId) && !config.DISCORD_CHANNEL_IDS.includes(msg.channel.id))
-    return { accept: false, reason: "channel-not-allowed" };
 
   const open = config.DISCORD_OPEN_CHANNEL_IDS.includes(parentId) || config.DISCORD_OPEN_CHANNEL_IDS.includes(msg.channel.id);
 

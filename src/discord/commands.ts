@@ -52,6 +52,8 @@ export async function handleCommand(
     bridge: AgentBridge;
     routeFor(interaction: CommandInteractionLike): RouteKey | null;
     isAdmin(interaction: CommandInteractionLike): boolean;
+    /** Same user, guild, channel and DM gating a message here would get. */
+    mayUse(interaction: CommandInteractionLike): boolean;
   },
 ): Promise<boolean> {
   if (!["new", "cancel", "status", "help"].includes(interaction.commandName)) return false;
@@ -59,6 +61,12 @@ export async function handleCommand(
   const route = deps.routeFor(interaction);
   if (!route) {
     await interaction.reply({ content: "This command only works where the bot is active.", ephemeral: true });
+    return true;
+  }
+
+  // Slash commands bypass message gating, so check it here. /help stays open.
+  if (interaction.commandName !== "help" && !deps.mayUse(interaction)) {
+    await interaction.reply({ content: "You can't use the bot here.", ephemeral: true });
     return true;
   }
 

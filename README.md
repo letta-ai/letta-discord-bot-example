@@ -231,6 +231,9 @@ the sandbox:
 | `/status` | Ephemeral status for the route. Ids and model are shown to admins only. |
 | `/help` | Short usage reminder. |
 
+`/new`, `/cancel` and `/status` follow the same gating as messages: the user, guild and channel
+allowlists in servers, and `DM_POLICY` in DMs. Anyone else gets an ephemeral refusal.
+
 There are deliberately no harness control commands. No `/model`, no `/reload`, no permission or
 toolset changes, nothing that mutates agent configuration from Discord. Configuration is env only
 and belongs to whoever deploys the listener.

@@ -15,7 +15,7 @@ import { routeKeyString, type AgentBridge, type InboundMessage, type RouteKey, t
 import { ApprovalManager } from "./approvals.ts";
 import { handleCommand, registerSlashCommands } from "./commands.ts";
 import { createTranscriber, type Transcriber } from "../transcribe/index.ts";
-import { Debouncer, Deduper, gate, isAdminUser, normalize, threadName, type IngressMessage } from "./ingress.ts";
+import { Debouncer, Deduper, gate, isAdminUser, normalize, surfaceDenial, threadName, type IngressMessage } from "./ingress.ts";
 
 /** Build the configured speech-to-text client, or undefined when disabled. */
 export function transcriberFromConfig(config: Config): Transcriber | undefined {
@@ -159,9 +159,30 @@ export async function startDiscord(
     return { guildId: i.guildId, channelId: ch.id, threadId: null };
   }
 
+  function rolesForInteraction(i: Interaction): { has(id: string): boolean } | undefined {
+    const roles = i.member?.roles;
+    if (!roles) return undefined;
+    if (Array.isArray(roles)) return { has: (id) => roles.includes(id) }; // APIInteractionGuildMember
+    return roles.cache;
+  }
+
   function adminForInteraction(i: Interaction): boolean {
-    const roles = i.member && "cache" in (i.member.roles as object) ? (i.member.roles as { cache: { has(id: string): boolean } }).cache : undefined;
-    return isAdminUser(config, i.user.id, roles);
+    return isAdminUser(config, i.user.id, rolesForInteraction(i));
+  }
+
+  function mayUseInteraction(i: Interaction): boolean {
+    const ch = i.channel;
+    if (!ch) return false;
+    const denial = surfaceDenial(config, {
+      userId: i.user.id,
+      roles: rolesForInteraction(i),
+      guildId: i.guildId,
+      channelId: ch.id,
+      parentId: ch.isThread() ? ch.parentId : null,
+      isDM: ch.isDMBased(),
+    });
+    if (denial) log.debug("ignored command", { user: i.user.id, reason: denial });
+    return !denial;
   }
 
   client.on(Events.MessageCreate, (m) => {
@@ -179,6 +200,7 @@ export async function startDiscord(
           bridge,
           routeFor: (i: Interaction) => routeForInteraction(i),
           isAdmin: (i: Interaction) => adminForInteraction(i),
+          mayUse: (i: Interaction) => mayUseInteraction(i),
         } as never);
       }
     } catch (err) {

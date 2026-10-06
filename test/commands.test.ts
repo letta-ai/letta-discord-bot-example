@@ -33,8 +33,8 @@ function interaction(commandName: string) {
   };
 }
 
-function deps(bridge: AgentBridge, admin = false, activeRoute: RouteKey | null = route) {
-  return { bridge, routeFor: () => activeRoute, isAdmin: () => admin };
+function deps(bridge: AgentBridge, admin = false, activeRoute: RouteKey | null = route, allowed = true) {
+  return { bridge, routeFor: () => activeRoute, isAdmin: () => admin, mayUse: () => allowed };
 }
 
 describe("slash command definitions and registration", () => {
@@ -80,6 +80,33 @@ describe("command handling", () => {
     const i = interaction("help");
     expect(await handleCommand(i.value, deps(fakeBridge(), false, null))).toBe(true);
     expect(i.replies).toEqual([{ content: "This command only works where the bot is active.", ephemeral: true }]);
+  });
+
+  test("refuses /new, /cancel and /status to users the gate would reject", async () => {
+    const touched: string[] = [];
+    const bridge = fakeBridge({
+      async reset() {
+        touched.push("reset");
+      },
+      async cancel() {
+        touched.push("cancel");
+        return true;
+      },
+      async status() {
+        touched.push("status");
+        return { busy: false, queued: 0, hasConversation: false };
+      },
+    });
+    for (const name of ["new", "cancel", "status"]) {
+      const i = interaction(name);
+      expect(await handleCommand(i.value, deps(bridge, false, route, false))).toBe(true);
+      expect(i.replies).toEqual([{ content: "You can't use the bot here.", ephemeral: true }]);
+    }
+    expect(touched).toEqual([]);
+
+    const help = interaction("help");
+    await handleCommand(help.value, deps(bridge, false, route, false));
+    expect(help.replies[0]?.content).toContain("Commands:");
   });
 
   test("resets a route publicly", async () => {
