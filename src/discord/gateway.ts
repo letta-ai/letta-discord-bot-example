@@ -39,6 +39,7 @@ export interface DiscordRuntime {
 }
 
 interface Pending {
+  route: RouteKey;
   inbound: InboundMessage;
   message: Message;
   channel: TextBasedChannel;
@@ -70,11 +71,11 @@ export async function startDiscord(
   let isReady = false;
   let stopping = false;
 
-  const routeOf = new Map<string, RouteKey>();
-  const debouncer = new Debouncer<Pending>(config.DEBOUNCE_MS, (key, items) => {
-    const route = routeOf.get(key);
-    if (!route || items.length === 0) return;
-    void dispatch(route, items);
+  // Each item carries its own route: with DEBOUNCE_MS=0 the flush runs inside push().
+  const debouncer = new Debouncer<Pending>(config.DEBOUNCE_MS, (_key, items) => {
+    const first = items[0];
+    if (!first) return;
+    void dispatch(first.route, items);
   });
 
   function adminForMessage(m: Message): boolean {
@@ -144,11 +145,10 @@ export async function startDiscord(
 
     const inbound = await normalize(config, message as unknown as IngressMessage, route, client.user.id, undefined, transcriber);
     if (!inbound.text && inbound.images.length === 0 && inbound.files.length === 0) return;
-    const key = routeKeyString(route);
-    routeOf.set(key, route);
+    const pending: Pending = { route, inbound, message, channel };
     // A thread creation means a fresh route; no point debouncing the first message.
-    if (decision.needsThread) void dispatch(route, [{ inbound, message, channel }]);
-    else debouncer.push(`${key}:${message.author.id}`, { inbound, message, channel }), routeOf.set(`${key}:${message.author.id}`, route);
+    if (decision.needsThread) void dispatch(route, [pending]);
+    else debouncer.push(`${routeKeyString(route)}:${message.author.id}`, pending);
   }
 
   function routeForInteraction(i: Interaction): RouteKey | null {
