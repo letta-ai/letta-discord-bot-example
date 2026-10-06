@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage } from "@letta-ai/letta-agent-sdk";
 import { loadConfig } from "../src/config.ts";
+import { TOOL_MODE_PREAMBLE, UNTRUSTED_PREAMBLE } from "../src/letta/envelope.ts";
 import { clientOptions, createAgentBridge, type LettaClientLike } from "../src/letta/bridge.ts";
 import { RouteStore } from "../src/letta/store.ts";
 import type { InboundMessage, RouteKey, TurnContext, TurnEvent } from "../src/types.ts";
@@ -133,6 +134,33 @@ describe("bridge", () => {
     expect(b.events[0]).toMatchObject({ kind: "started", createdConversation: false });
     expect(store.get("g:c:t")?.conversationId).toBe("conv-1");
     expect(String(calls.sends[0])).toContain("<channel-notification");
+  });
+
+  test("open channels in tool mode tell the agent to speak through the tool and never gate it", async () => {
+    const toolConfig = loadConfig({
+      DISCORD_BOT_TOKEN: "x",
+      LETTA_API_KEY: "y",
+      LETTA_AGENT_ID: "agent-123",
+      SESSION_IDLE_MINUTES: "0",
+      APPROVAL_MODE: "deny",
+      DISCORD_OPEN_CHANNEL_IDS: "c",
+      OPEN_CHANNEL_REPLY_MODE: "tool",
+    });
+    const { client, calls } = fakeClient(() => ok("ignored"));
+    const bridge = createAgentBridge(toolConfig, { client, store: new RouteStore(":memory:") });
+    await bridge.submit([inbound("m1", "anyone around?")], ctxCollector("m1").ctx);
+
+    expect(String(calls.sends[0])).toContain(TOOL_MODE_PREAMBLE);
+    expect(String(calls.sends[0])).not.toContain(UNTRUSTED_PREAMBLE);
+    expect(await calls.canUseTool("discord_send_message", { content: "hi" }, {})).toEqual({ behavior: "allow" });
+    expect(await calls.canUseTool("Bash", { command: "ls" }, {})).toMatchObject({ behavior: "deny" });
+  });
+
+  test("relay routes keep the automatic-reply preamble", async () => {
+    const { client, calls } = fakeClient(() => ok("hi"));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    await bridge.submit([inbound("m1", "hello")], ctxCollector("m1").ctx);
+    expect(String(calls.sends[0])).toContain(UNTRUSTED_PREAMBLE);
   });
 
   test("uploads files into the sandbox and references paths in the envelope", async () => {

@@ -145,10 +145,11 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `APPROVAL_MODE` | `admins` | `deny`, `admins`, `requester` or `allow`. |
 | `APPROVAL_TIMEOUT_SECONDS` | `300` | How long an approval stays clickable, then deny. |
 | `TURN_TIMEOUT_SECONDS` | `900` | Longest a whole turn may run, approval waits included. Must exceed `APPROVAL_TIMEOUT_SECONDS`. The SDK's own default is 2 minutes. |
-| `ENABLE_DISCORD_TOOLS` | `true` | Expose the listener-owned Discord tools to the agent. |
+| `ENABLE_DISCORD_TOOLS` | `true` | Expose the listener-owned Discord tools to the agent. Does not remove `discord_send_message` in tool-mode open channels. |
 | `DISCORD_GUILD_IDS` | empty (CSV) | Guild allowlist, empty means any guild the bot is in. |
 | `DISCORD_CHANNEL_IDS` | empty (CSV) | Channel allowlist, empty means any channel. |
 | `DISCORD_OPEN_CHANNEL_IDS` | empty (CSV) | Channels where every message is answered without a mention. |
+| `OPEN_CHANNEL_REPLY_MODE` | `relay` | `relay` posts every reply in open channels. `tool` lets the agent stay silent there, see Open channels. |
 | `DISCORD_ALLOWED_USER_IDS` | empty (CSV) | User allowlist. In servers, empty means everyone; once set, only these users and admins are answered. Also the DM allowlist under `DM_POLICY=allowlist`, where empty means admins only. |
 | `DISCORD_ADMIN_USER_IDS` | empty (CSV) | Users who count as admins for approvals and detailed `/status`. |
 | `DISCORD_ADMIN_ROLE_IDS` | empty (CSV) | Roles that count as admins. |
@@ -190,6 +191,19 @@ A route is one Discord surface: `(guild, channel, thread)`, or the DM channel.
 - DMs route to the DM channel, subject to `DM_POLICY`.
 - Messages from the bot itself are always ignored, and other bots unless `RESPOND_TO_BOTS=true`.
 
+### Open channels
+
+An open channel shows the agent every message, most of them not meant for it.
+`OPEN_CHANNEL_REPLY_MODE` decides how it answers there and in threads under it:
+
+- `relay` (default): like everywhere else, every reply the agent writes is posted.
+- `tool`: plain text is not posted. The agent speaks only by calling `discord_send_message`,
+  so it can read along and stay silent. There is no typing indicator, tool status line, or
+  lifecycle reaction, and `discord_send_message` never waits for approval. Failed turns
+  still post an error. Unposted text is logged, which helps spot a model that forgets the tool.
+
+Mentions in other channels, bot threads, and DMs always relay.
+
 On the first message for a route the listener creates a Letta conversation, records
 `route -> conversationId` in `bun:sqlite` under `DATA_DIR`, and resumes a session for it. That
 conversation owns one Cloud sandbox. Only one turn per route runs at a time; messages that arrive
@@ -216,15 +230,15 @@ The default `admins` mode needs at least one id in `DISCORD_ADMIN_USER_IDS` or
 
 ## 🔧 Discord tools
 
-With `ENABLE_DISCORD_TOOLS=true` the agent gets four tools that run in the listener process, not in
-the sandbox:
+With `ENABLE_DISCORD_TOOLS=true` the agent gets these tools. They run in the listener process, not
+in the sandbox:
 
 | Tool | Purpose |
 |---|---|
 | `discord_react` | Add a reaction to a message in the route. |
 | `discord_read_history` | Read recent messages from the route. |
 | `discord_send_file` | Send a file from the sandbox to the route. |
-| `discord_send_message` | Post an extra message to the route. |
+| `discord_send_message` | Post a message. Only in open channels with `OPEN_CHANNEL_REPLY_MODE=tool`, where it is the only way to speak. |
 
 ## 💬 Slash commands
 

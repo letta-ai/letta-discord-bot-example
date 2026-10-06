@@ -80,6 +80,42 @@ class FakeChannel implements RenderChannel {
 }
 
 describe("TurnRenderer", () => {
+  test("tool reply mode posts no assistant text, typing, tool status, or reactions", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({
+      config: config({ STREAM_EDITS: true, SHOW_REASONING: true, LIFECYCLE_REACTIONS: true }),
+      channel,
+      triggerMessage: trigger,
+      typingIntervalMs: 2,
+      replyMode: "tool",
+    });
+
+    renderer.onEvent({ kind: "started", conversationId: "c", createdConversation: false });
+    renderer.onEvent({ kind: "reasoning_delta", text: "Should I chime in?" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Thinking out loud.", messageId: "message-a" });
+    renderer.onEvent({ kind: "tool_call", toolCallId: "t1", toolName: "discord_send_message", summary: "Send" });
+    renderer.onEvent({ kind: "tool_result", toolCallId: "t1", isError: false });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+
+    expect([...trigger.replies, ...channel.sent]).toEqual([]);
+    expect(channel.typing).toBe(0);
+    expect(trigger.reacted).toEqual([]);
+  });
+
+  test("tool reply mode still reports a failed turn", async () => {
+    const channel = new FakeChannel(false);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger, replyMode: "tool" });
+
+    renderer.onEvent({ kind: "started", conversationId: "c", createdConversation: false });
+    renderer.onEvent({ kind: "done", success: false, durationMs: 1, errorCode: "boom" });
+    await renderer.finished;
+
+    expect([...trigger.replies, ...channel.sent].map((m) => m.content)).toEqual([FAILURE_TEXT]);
+  });
+
   test("streams a reply, splits safely, and completes lifecycle reactions", async () => {
     const channel = new FakeChannel(false);
     const trigger = new FakeMessage();

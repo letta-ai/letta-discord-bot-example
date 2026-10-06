@@ -8,7 +8,7 @@ import {
   type Message,
   type TextBasedChannel,
 } from "discord.js";
-import type { Config } from "../config.ts";
+import { replyModeFor, type Config } from "../config.ts";
 import type { RouteStore } from "../letta/store.ts";
 import { log } from "../log.ts";
 import { routeKeyString, type AgentBridge, type InboundMessage, type RouteKey, type TurnContext } from "../types.ts";
@@ -80,7 +80,12 @@ export async function startDiscord(
 
   async function dispatch(route: RouteKey, items: Pending[]) {
     const last = items[items.length - 1]!;
-    const renderer = new TurnRenderer({ config, channel: last.channel as never, triggerMessage: last.message as never });
+    const renderer = new TurnRenderer({
+      config,
+      channel: last.channel as never,
+      triggerMessage: last.message as never,
+      replyMode: replyModeFor(config, route),
+    });
     const ctx: TurnContext = {
       route,
       triggerMessageId: last.message.id,

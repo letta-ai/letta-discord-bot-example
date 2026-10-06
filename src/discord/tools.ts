@@ -1,6 +1,6 @@
 import type { AnyAgentTool } from "@letta-ai/letta-agent-sdk";
 import { posix as path } from "node:path";
-import type { Config } from "../config.ts";
+import { replyModeFor, type Config } from "../config.ts";
 import type { ToolFactory } from "../types.ts";
 import { splitForDiscord } from "./split.ts";
 
@@ -80,6 +80,16 @@ function historyLine(message: DiscordMessageLike): string {
   return (prefix + body).slice(0, 500);
 }
 
+export const SEND_MESSAGE_DESCRIPTION =
+  "Post a message in this Discord channel. This is the only way to speak here: your plain text replies are not shown. " +
+  "Most messages in this channel are not addressed to you. Call this only when you have something worth saying, " +
+  "and otherwise end your turn without calling it.";
+
+/**
+ * Relay routes post assistant text automatically, so they never get
+ * discord_send_message. Tool routes always get it, even with
+ * ENABLE_DISCORD_TOOLS=false, because it is their only way to speak.
+ */
 export function createDiscordToolFactory(deps: { client: DiscordClientLike; config: Config }): ToolFactory {
   return (route, currentTurn, sandbox): AnyAgentTool[] => {
     const routeChannel = async () => asChannel(await deps.client.channels.fetch(route.threadId ?? route.channelId));
@@ -142,7 +152,7 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
       {
         name: "discord_send_message",
         label: "Send Discord message",
-        description: "Send an additional message in this Discord conversation, such as a progress update. Normal replies are posted automatically, so do not use this for the normal final response.",
+        description: SEND_MESSAGE_DESCRIPTION,
         parameters: {
           type: "object",
           properties: { content: { type: "string" }, reply_to_message_id: { type: "string" } },
@@ -172,7 +182,7 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
       },
     ];
 
-    if (sandbox) {
+    if (deps.config.ENABLE_DISCORD_TOOLS && sandbox) {
       tools.push({
         name: "discord_send_file",
         label: "Send file to Discord",
@@ -209,6 +219,9 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
       });
     }
 
-    return tools;
+    const toolMode = replyModeFor(deps.config, route) === "tool";
+    return tools.filter((t) =>
+      t.name === "discord_send_message" ? toolMode : t.name === "discord_send_file" || deps.config.ENABLE_DISCORD_TOOLS,
+    );
   };
 }

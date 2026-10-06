@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRANSCRIBE_PROVIDERS } from "./transcribe/index.ts";
+import type { RouteKey } from "./types.ts";
 
 const csv = z
   .string()
@@ -49,6 +50,8 @@ export const ConfigSchema = z.object({
   DISCORD_GUILD_IDS: csv, // empty = any guild the bot is in
   DISCORD_CHANNEL_IDS: csv, // empty = any channel
   DISCORD_OPEN_CHANNEL_IDS: csv, // respond to every message (no mention needed)
+  // relay: assistant text is posted. tool: only discord_send_message posts, so the agent can stay silent.
+  OPEN_CHANNEL_REPLY_MODE: z.enum(["relay", "tool"]).default("relay"),
   DISCORD_ALLOWED_USER_IDS: csv, // guilds: empty = everyone; DMs (allowlist policy): empty = admins only
   DISCORD_ADMIN_USER_IDS: csv,
   DISCORD_ADMIN_ROLE_IDS: csv,
@@ -105,4 +108,16 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error(`Invalid configuration:\n${issues}`);
   }
   return parsed.data;
+}
+
+export type ReplyMode = "relay" | "tool";
+
+/**
+ * How replies reach Discord on a route. Tool mode applies only to open channels
+ * (and threads under them), where the agent sees messages not addressed to it.
+ */
+export function replyModeFor(config: Pick<Config, "DISCORD_OPEN_CHANNEL_IDS" | "OPEN_CHANNEL_REPLY_MODE">, route: RouteKey): ReplyMode {
+  if (config.OPEN_CHANNEL_REPLY_MODE !== "tool" || route.guildId === null) return "relay";
+  const open = config.DISCORD_OPEN_CHANNEL_IDS;
+  return open.includes(route.channelId) || (route.threadId !== null && open.includes(route.threadId)) ? "tool" : "relay";
 }

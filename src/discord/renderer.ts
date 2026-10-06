@@ -1,4 +1,4 @@
-import type { Config } from "../config.ts";
+import type { Config, ReplyMode } from "../config.ts";
 import { log } from "../log.ts";
 import type { TurnEvent } from "../types.ts";
 import { splitForDiscord } from "./split.ts";
@@ -39,6 +39,12 @@ export interface TurnRendererOptions {
   triggerMessage: RenderMessage;
   /** Typing refresh interval (Discord typing lasts ~10s). Overridable for tests. */
   typingIntervalMs?: number;
+  /**
+   * `tool`: the agent speaks only through discord_send_message, so assistant
+   * text, typing, tool status, reasoning, and lifecycle reactions are not shown.
+   * Failures still are. Defaults to `relay`.
+   */
+  replyMode?: ReplyMode;
 }
 
 export const FAILURE_TEXT =
@@ -54,6 +60,8 @@ export class TurnRenderer {
   private readonly channel: RenderChannel;
   private readonly trigger: RenderMessage;
   private readonly typingIntervalMs: number;
+  private readonly quiet: boolean; // tool reply mode
+  private droppedChars = 0;
 
   private chain: Promise<void> = Promise.resolve();
   private resolveFinished!: () => void;
@@ -85,6 +93,7 @@ export class TurnRenderer {
     this.channel = opts.channel;
     this.trigger = opts.triggerMessage;
     this.typingIntervalMs = opts.typingIntervalMs ?? 8000;
+    this.quiet = opts.replyMode === "tool";
     this.finished = new Promise<void>((r) => {
       this.resolveFinished = r;
     });
@@ -103,30 +112,34 @@ export class TurnRenderer {
     switch (e.kind) {
       case "started":
         // Typing is the in-progress signal; only the outcome gets a reaction.
-        this.startTyping();
+        if (!this.quiet) this.startTyping();
         return;
       case "assistant_delta":
         if (!e.text) return;
+        if (this.quiet) {
+          this.droppedChars += e.text.length;
+          return;
+        }
         if (e.messageId && this.seg.id && e.messageId !== this.seg.id) this.endSegment();
         if (e.messageId && !this.seg.id) this.seg.id = e.messageId;
         this.seg.text += e.text;
         if (this.config.STREAM_EDITS) this.scheduleTextSync();
         return;
       case "reasoning_delta":
-        if (!this.config.SHOW_REASONING || !e.text) return;
+        if (this.quiet || !this.config.SHOW_REASONING || !e.text) return;
         this.reasoning += e.text;
         this.scheduleStatusSync();
         return;
       case "tool_call":
         this.toolIds.add(e.toolCallId);
         this.endSegment();
-        if (!this.config.SHOW_TOOL_STATUS) return;
+        if (this.quiet || !this.config.SHOW_TOOL_STATUS) return;
         this.toolLine = `-# ${e.summary || e.toolName}`;
         this.reasoning = "";
         this.scheduleStatusSync();
         return;
       case "retry":
-        if (!this.config.SHOW_TOOL_STATUS) return;
+        if (this.quiet || !this.config.SHOW_TOOL_STATUS) return;
         this.toolLine = `-# Retrying (attempt ${e.attempt}/${e.maxAttempts})`;
         this.scheduleStatusSync();
         return;
@@ -162,7 +175,7 @@ export class TurnRenderer {
   }
 
   private react(emoji: string): void {
-    if (!this.config.LIFECYCLE_REACTIONS) return;
+    if (this.quiet || !this.config.LIFECYCLE_REACTIONS) return;
     this.enqueue(() => this.trigger.react(emoji));
   }
 
@@ -309,6 +322,11 @@ export class TurnRenderer {
     this.textTimer = this.statusTimer = null;
 
     const interrupted = e.errorCode === "interrupted";
+    if (this.droppedChars > 0) {
+      // Plain text is invisible in tool mode. Logged so an operator can spot a
+      // model that writes replies instead of calling discord_send_message.
+      log.info("tool mode: assistant text not posted", { chars: this.droppedChars });
+    }
 
     // Deliver whatever text we have (also partial text on failure/interrupt).
     const last = this.seg;

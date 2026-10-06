@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import type { Config } from "../src/config.ts";
+import { replyModeFor, type Config } from "../src/config.ts";
 import { createDiscordToolFactory } from "../src/discord/tools.ts";
 import type { RouteKey, SandboxFiles, TurnContext } from "../src/types.ts";
 
-const config = { MAX_FILE_BYTES: 1024 } as Config;
+// The route below is a thread under an open channel in tool mode, so every tool is offered.
+const config = {
+  MAX_FILE_BYTES: 1024,
+  ENABLE_DISCORD_TOOLS: true,
+  DISCORD_OPEN_CHANNEL_IDS: ["parent"],
+  OPEN_CHANNEL_REPLY_MODE: "tool",
+} as Config;
 const route: RouteKey = { guildId: "g", channelId: "parent", threadId: "thread" };
 
 function harness() {
@@ -138,5 +144,34 @@ describe("Discord tools", () => {
     const result = await tool.execute("call", { content: "hello" });
     expect(result.isError).toBe(true);
     expect(result.content[0]!.type).toBe("text");
+  });
+});
+
+describe("reply modes", () => {
+  const names = (c: Partial<Config>, r: RouteKey) =>
+    createDiscordToolFactory({ client: harness().client, config: { ...config, ...c } as Config })(r, turn, null).map((t) => t.name);
+  const dm: RouteKey = { guildId: null, channelId: "parent", threadId: null };
+  const elsewhere: RouteKey = { guildId: "g", channelId: "other", threadId: null };
+
+  test("relay routes never get discord_send_message", () => {
+    expect(names({ OPEN_CHANNEL_REPLY_MODE: "relay" }, route)).not.toContain("discord_send_message");
+    expect(names({}, elsewhere)).not.toContain("discord_send_message");
+    expect(names({}, dm)).not.toContain("discord_send_message");
+    expect(names({}, elsewhere)).toEqual(["discord_react", "discord_read_history"]);
+  });
+
+  test("tool routes keep discord_send_message even with Discord tools disabled", () => {
+    expect(names({ ENABLE_DISCORD_TOOLS: false }, route)).toEqual(["discord_send_message"]);
+    expect(names({ ENABLE_DISCORD_TOOLS: false }, elsewhere)).toEqual([]);
+  });
+
+  test("replyModeFor covers open channels and their threads only", () => {
+    const tool = { DISCORD_OPEN_CHANNEL_IDS: ["parent", "openthread"], OPEN_CHANNEL_REPLY_MODE: "tool" as const };
+    expect(replyModeFor(tool, { guildId: "g", channelId: "parent", threadId: null })).toBe("tool");
+    expect(replyModeFor(tool, route)).toBe("tool");
+    expect(replyModeFor(tool, { guildId: "g", channelId: "other", threadId: "openthread" })).toBe("tool");
+    expect(replyModeFor(tool, elsewhere)).toBe("relay");
+    expect(replyModeFor(tool, dm)).toBe("relay");
+    expect(replyModeFor({ ...tool, OPEN_CHANNEL_REPLY_MODE: "relay" }, route)).toBe("relay");
   });
 });

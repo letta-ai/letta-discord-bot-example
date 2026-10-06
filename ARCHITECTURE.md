@@ -40,6 +40,9 @@ Routing
   (name: first ~60 chars of text, fallback `Chat with <bot>`), route = that thread.
 - Message inside a thread: route = thread. In threads the bot created/has a conversation for, no mention needed.
 - `DISCORD_OPEN_CHANNEL_IDS`: respond to every message without mention. Route = channel; open channels never auto-thread.
+- `OPEN_CHANNEL_REPLY_MODE=tool` (`replyModeFor` in `config.ts`): on guild routes whose channel or thread is open, assistant
+  text is dropped and `discord_send_message` is the only output (always offered, auto-allowed). The renderer stays quiet
+  except for failures. Every other route relays and never gets `discord_send_message`.
 - DMs: `DM_POLICY` off | allowlist (DISCORD_ALLOWED_USER_IDS + admins) | open. Route = DM channel.
 - Guilds: a non-empty `DISCORD_ALLOWED_USER_IDS` limits replies to those users and admins; empty = everyone.
 - Ignore own messages always; other bots unless `RESPOND_TO_BOTS`.

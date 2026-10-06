@@ -5,7 +5,7 @@ import {
   type LettaCodeSession,
   type SDKMessage,
 } from "@letta-ai/letta-agent-sdk";
-import type { Config } from "../config.ts";
+import { replyModeFor, type Config } from "../config.ts";
 import { log } from "../log.ts";
 import {
   routeKeyString,
@@ -185,7 +185,9 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
   function canUseTool(s: RouteState): CanUseToolCallback {
     return async (toolName, toolInput, context) => {
       const turn = s.current;
-      if (config.APPROVAL_MODE === "allow") return { behavior: "allow" };
+      // Speaking in a tool-mode channel must never wait on an approver. The tool
+      // only posts into this route, with mentions disabled.
+      if (config.APPROVAL_MODE === "allow" || toolName === "discord_send_message") return { behavior: "allow" };
       if (config.APPROVAL_MODE === "deny" || !turn) {
         return { behavior: "deny", message: `Tool ${toolName} requires approval, which is disabled for this Discord bot.` };
       }
@@ -224,7 +226,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       },
     };
     const tools =
-      config.ENABLE_DISCORD_TOOLS && deps.toolFactory
+      deps.toolFactory
         ? deps.toolFactory(s.route, () => s.current, config.LETTA_COMPUTER ? null : sandboxProxy)
         : [];
     const allowedTools =
@@ -381,7 +383,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         if (interruptedDuringSetup()) return;
         const attachments = await uploadFiles(s, session, batch, emit);
         if (interruptedDuringSetup()) return;
-        await session.send(buildSendMessage(batch, attachments));
+        await session.send(buildSendMessage(batch, attachments, replyModeFor(config, s.route)));
         let terminal = false;
         for await (const msg of session.stream()) {
           if (mapMessage(msg, emit, acted)) {
