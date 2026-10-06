@@ -1,66 +1,134 @@
-# letta-discord-listener
+<a href="https://docs.letta.com/">
+  <img alt="A Letta agent chatting in Discord" src="/assets/discord_chatbot_header_2x.png">
+  <h1 align="center">Letta Discord Bot</h1>
+</a>
 
-A small Bun + TypeScript process that connects one Discord bot to one Letta agent through the
-Letta Agent SDK (`backend: "cloud"`).
+<p align="center">
+  Put a <a href="https://docs.letta.com/">Letta</a> agent in your Discord server. It remembers people,
+  learns over time, runs tools in its own sandbox, and answers in threads, DMs, and voice messages.
+</p>
 
-Looking for the previous Express bot (message batching, timer heartbeats, per-user memory blocks)?
-It is preserved unchanged on the [`legacy`](https://github.com/letta-ai/letta-discord-bot-example/tree/legacy)
-branch.
+<div align="center">
+|
+  <a href="#-features">Features</a> ·
+  <a href="#-whats-included">What's included</a> ·
+  <a href="#%EF%B8%8F-quickstart">Quickstart</a> ·
+  <a href="#%EF%B8%8F-configuration">Configuration</a> ·
+  <a href="#-deploying">Deploying</a>
+|
+</div>
 
-## What it is
+> [!NOTE]
+> This is a rewrite on the [Letta Agent SDK](https://docs.letta.com/). The previous Express bot,
+> with message batching, timer heartbeats, and per-user memory blocks, is preserved unchanged on the
+> [`legacy`](https://github.com/letta-ai/letta-discord-bot-example/tree/legacy) branch.
 
-This is a listener you run yourself, the alternative to letting Letta run Letta Code Channels:
+## ✨ Features
 
-- Every Discord thread or DM maps to its own Letta conversation, so every surface gets its own
-  SDK-managed Cloud sandbox.
-- The listener holds the Discord bot token. Sandboxes never see it, they only run the agent tools
-  the SDK hands them.
-- Turns are serialized per route, streamed back into Discord, and tool calls are gated by an
-  approval policy you control through env vars.
-- Nothing about the agent configuration (model, permission mode, toolset) can be changed from
-  Discord. Only conversations and turns can.
+- 🧠 **An agent that remembers.** The bot is a stateful Letta agent, not a stateless chat
+  completion. It carries memory across every conversation, so it gets to know your server and
+  the people in it.
+- 🧵 **A conversation per thread.** Mention the bot and it opens a thread. Every thread and DM
+  becomes its own Letta conversation with its own Cloud sandbox, so parallel chats never bleed
+  into each other.
+- 🛠️ **Real tools, safely.** The agent can run code, read files, and work in its sandbox. Risky
+  tool calls show up as Approve and Deny buttons, and you decide who is allowed to click them.
+- ⚡ **Live progress.** A tool status line updates in place while the agent works, and replies can
+  stream into Discord as they are written.
+- 🎙️ **Voice messages.** Send a voice note and the bot transcribes it before the agent reads it,
+  with nine providers to choose from, including OpenAI, Groq, Deepgram, and a self-hosted Whisper.
+- 🖼️ **Images and files.** Images go straight to the model. Other files land in the sandbox for the
+  agent to open, and it can send files back.
+- 🔐 **Your token, your rules.** You run the bot, so the Discord token never leaves your process.
+  Nothing in Discord can change the agent's model, permissions, or tools.
+- 🩺 **A setup doctor.** `bun run doctor` checks every credential and permission before you go
+  live, and tells you exactly what to fix.
 
-## Quickstart
+## 📦 What's included
 
-1. Create a Discord application at <https://discord.com/developers/applications> and add a bot.
-2. On the **Bot** page enable the **Message Content** privileged gateway intent. Without it the
-   listener receives empty message content.
-3. Grab the bot token from the same page (**Reset Token** if you never copied it).
-4. On the **OAuth2 > URL Generator** page, pick scopes `bot` and `applications.commands`, then
-   enable exactly these permissions:
+- [Letta Agent SDK](https://docs.letta.com/)
+
+  - Runs the agent. It creates a conversation and a Cloud sandbox per Discord thread, streams
+    replies, and handles tool approvals.
+
+- [discord.js](https://discord.js.org/)
+
+  - Connects to the [Discord API](https://discord.com/developers/docs/intro) for messages,
+    threads, buttons, and slash commands.
+
+- [Bun](https://bun.sh/) and [TypeScript](https://www.typescriptlang.org)
+
+  - Bun runs the bot and its test suite, and stores the thread-to-conversation index in
+    `bun:sqlite`. TypeScript and [Zod](https://zod.dev) keep the code and config typed and
+    validated.
+
+- 🚀 Deploy recipes
+
+  - A tested systemd unit, Docker Compose, Fly.io, Railway, and Render, all in
+    [docs/deploying.md](docs/deploying.md).
+
+## ⚡️ Quickstart
+
+### 📋 What you need
+
+- A [Letta](https://app.letta.com) account, an agent, and an API key.
+- A Discord account with permission to add bots to a server.
+- [Bun](https://bun.sh/) and [Node.js](https://nodejs.org/) (npm installs the dependencies).
+
+### 👾 Create your Discord app
+
+1. Create an application at <https://discord.com/developers/applications> and add a bot.
+2. On the **Bot** page, enable the **Message Content** privileged gateway intent. Without it the
+   bot receives empty messages.
+3. Copy the bot token from the same page (**Reset Token** if you never copied it).
+4. On **OAuth2 > URL Generator**, pick the `bot` and `applications.commands` scopes, then enable
+   exactly these permissions:
    `Send Messages`, `Send Messages in Threads`, `Create Public Threads`, `Read Message History`,
    `Add Reactions`, `Attach Files`, `Embed Links`.
-   Generate the URL, open it, and install the bot into your guild.
-5. Create an agent in Letta and note its `agent-...` id and your Letta API key.
-6. Set up env:
+   Open the generated URL and install the bot into your server.
 
-   ```bash
-   cp .env.example .env
-   ```
+### 🤖 Connect your Letta agent
 
-   At minimum fill in `DISCORD_BOT_TOKEN`, `LETTA_API_KEY` and `LETTA_AGENT_ID`. Never commit the
-   `.env` file.
-7. Run it:
+Create an agent in [Letta](https://app.letta.com) and note its `agent-...` ID and your API key.
 
-   ```bash
-   npm ci && bun run start
-   ```
+```bash
+git clone https://github.com/letta-ai/letta-discord-bot-example.git
+cd letta-discord-bot-example
+cp .env.example .env
+```
 
-   Dependencies install with npm (`package-lock.json`) because Bun 1.3.14's resolver crashes on
-   this dependency graph. Bun is still the runtime; `bun run src/index.ts` runs the entrypoint directly.
+Fill in at least `DISCORD_BOT_TOKEN`, `LETTA_API_KEY`, and `LETTA_AGENT_ID`. Never commit `.env`.
 
-### Checking your setup
+### 🩺 Check your setup
 
-Before starting the listener, run `bun run doctor`. It validates configuration, Discord access and
-permissions, the Letta agent and computer, transcription credentials when they can be checked without
-audio, and `DATA_DIR` write access. It does not connect to the Discord Gateway or post messages.
+```bash
+npm ci
+bun run doctor
+```
 
-## Configuration
+The doctor validates your configuration, Discord access and permissions, the Letta agent and
+computer, transcription credentials, and `DATA_DIR` write access. It never connects to the
+Discord Gateway or posts messages.
+
+### 🚀 Run it
+
+```bash
+bun run start
+```
+
+Mention the bot in a channel and it opens a thread to chat in. Dependencies install with npm
+(`package-lock.json`) because Bun 1.3.14's resolver crashes on this dependency graph. Bun is still
+the runtime.
+
+## ⚙️ Configuration
 
 All configuration is env only, validated by `ConfigSchema` in `src/config.ts`. Defaults below are
 what the process uses when a variable is absent. CSV means comma separated. An empty value is fine
 for CSV, integer, boolean and free text keys, but the enum and URL keys must hold a valid value or
 stay unset, since an empty string fails validation and the process refuses to start.
+
+<details>
+<summary>All environment variables</summary>
 
 | Variable | Default | Description |
 |---|---|---|
@@ -108,7 +176,9 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `SESSION_IDLE_MINUTES` | `15` | Close an idle Letta session. The conversation is kept. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 
-## How routing works
+</details>
+
+## 🧭 How routing works
 
 A route is one Discord surface: `(guild, channel, thread)`, or the DM channel.
 
@@ -126,7 +196,7 @@ conversation owns one Cloud sandbox. Only one turn per route runs at a time; mes
 mid-turn are queued and merged into the next turn. `/new` drops the mapping so the next message
 starts a fresh conversation (the old one stays in Letta).
 
-## Approvals
+## ✅ Approvals
 
 `APPROVAL_MODE` decides who signs off on a tool call. A request shows the tool name and a compact
 preview of its input, plus Approve and Deny buttons.
@@ -140,7 +210,7 @@ preview of its input, plus Approve and Deny buttons.
 
 Anything not decided within `APPROVAL_TIMEOUT_SECONDS` is denied.
 
-## Discord tools
+## 🔧 Discord tools
 
 With `ENABLE_DISCORD_TOOLS=true` the agent gets four tools that run in the listener process, not in
 the sandbox:
@@ -152,7 +222,7 @@ the sandbox:
 | `discord_send_file` | Send a file from the sandbox to the route. |
 | `discord_send_message` | Post an extra message to the route. |
 
-## Slash commands
+## 💬 Slash commands
 
 | Command | Effect |
 |---|---|
@@ -165,7 +235,7 @@ There are deliberately no harness control commands. No `/model`, no `/reload`, n
 toolset changes, nothing that mutates agent configuration from Discord. Configuration is env only
 and belongs to whoever deploys the listener.
 
-## Files and images
+## 🖼️ Files and images
 
 Images at or below `MAX_IMAGE_BYTES` are inlined to the model as multimodal content. Anything else
 is downloaded by the listener and uploaded into the conversation sandbox under `/root/downloads`
@@ -174,7 +244,7 @@ local path together with the original Discord CDN url, which the agent can re-do
 `/root/downloads` with `discord_send_file`. Replies longer than the Discord limit are split on
 paragraph and line boundaries with code fences kept balanced across chunks.
 
-## Voice messages
+## 🎙️ Voice messages
 
 With `TRANSCRIBE_PROVIDER` set, Discord voice messages and audio attachments are transcribed by the
 listener before the turn starts. The transcript goes into the envelope inside the attachment
@@ -196,7 +266,7 @@ failed transcription never drops the message; the attachment carries `transcript
 Voice messages cannot contain a mention, so they reach the agent in bot threads, DMs, and channels
 listed in `DISCORD_OPEN_CHANNEL_IDS`, not as a fresh mention in a channel.
 
-## Deploying
+## 🚀 Deploying
 
 Run exactly one instance. A second process with the same bot token opens a second Gateway session
 and duplicates replies. Keep `DATA_DIR` on persistent storage, allow about 30 seconds to stop, and
@@ -206,7 +276,7 @@ expose no public port; `GET /healthz` on `HEALTH_PORT` is for platform health ch
 Docker Compose (`deploy/compose.yaml`), Fly.io (`fly.toml.example`), Railway, and Render, and
 explains why Modal is a poor fit.
 
-## Comparison with Letta Code Channels
+## 🆚 Compared with Letta Code Channels
 
 | | Letta Code Channels | This listener |
 |---|---|---|
@@ -219,7 +289,7 @@ explains why Modal is a poor fit.
 | Routing index | Letta internal | `bun:sqlite` under `DATA_DIR` |
 | Scaling | Letta managed | You manage, one replica |
 
-## Security notes
+## 🔐 Security notes
 
 - The bot token lives only in the listener process env. Sandboxes and the agent never receive it,
   because all Discord access goes through the listener-owned tools.
@@ -235,10 +305,10 @@ explains why Modal is a poor fit.
 - The `/app/data` volume contains route ids and conversation ids. Treat it as sensitive and keep it
   on private storage.
 
-## Layout
+## 🗂️ Layout
 
 See `ARCHITECTURE.md` for module ownership and the full behavior spec.
 
-## License
+## 📄 License
 
 MIT. See [LICENSE](LICENSE).
