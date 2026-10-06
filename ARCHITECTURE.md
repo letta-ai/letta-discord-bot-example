@@ -41,6 +41,7 @@ Routing
 - Message inside a thread: route = thread. In threads the bot created/has a conversation for, no mention needed.
 - `DISCORD_OPEN_CHANNEL_IDS`: respond to every message without mention (route = channel unless AUTO_THREAD).
 - DMs: `DM_POLICY` off | allowlist (DISCORD_ALLOWED_USER_IDS + admins) | open. Route = DM channel.
+- Guilds: a non-empty `DISCORD_ALLOWED_USER_IDS` limits replies to those users and admins; empty = everyone.
 - Ignore own messages always; other bots unless `RESPOND_TO_BOTS`.
 
 Letta

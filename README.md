@@ -149,7 +149,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `DISCORD_GUILD_IDS` | empty (CSV) | Guild allowlist, empty means any guild the bot is in. |
 | `DISCORD_CHANNEL_IDS` | empty (CSV) | Channel allowlist, empty means any channel. |
 | `DISCORD_OPEN_CHANNEL_IDS` | empty (CSV) | Channels where every message is answered without a mention. |
-| `DISCORD_ALLOWED_USER_IDS` | empty (CSV) | Users allowed to DM the bot under `DM_POLICY=allowlist`. |
+| `DISCORD_ALLOWED_USER_IDS` | empty (CSV) | User allowlist. In servers, empty means everyone; once set, only these users and admins are answered. Also the DM allowlist under `DM_POLICY=allowlist`, where empty means admins only. |
 | `DISCORD_ADMIN_USER_IDS` | empty (CSV) | Users who count as admins for approvals and detailed `/status`. |
 | `DISCORD_ADMIN_ROLE_IDS` | empty (CSV) | Roles that count as admins. |
 | `DM_POLICY` | `allowlist` | `off`, `allowlist` or `open`. |
@@ -301,7 +301,9 @@ explains why Modal is a poor fit.
 - Keep `PERMISSION_MODE=standard` or stricter and `APPROVAL_MODE` at `admins` or `requester` unless
   you fully trust every allowed user. `APPROVAL_MODE=allow` plus `PERMISSION_MODE=unrestricted`
   hands remote shell execution to anyone who can message the bot.
-- Prefer `DM_POLICY=allowlist` or `off`, and set `DISCORD_ALLOWED_USER_IDS` explicitly.
+- Prefer `DM_POLICY=allowlist` or `off`, and set `DISCORD_ALLOWED_USER_IDS` explicitly. The same
+  list also restricts who the bot answers in servers, so include everyone who should be able to
+  use it there.
 - Only invite the bot to the guilds it needs and grant only the seven permissions listed above.
 - `.env` is gitignored. Pass secrets through your platform secret store, never a Dockerfile, a
   committed config, or a slash command.

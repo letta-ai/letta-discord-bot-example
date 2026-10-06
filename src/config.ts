@@ -49,7 +49,7 @@ export const ConfigSchema = z.object({
   DISCORD_GUILD_IDS: csv, // empty = any guild the bot is in
   DISCORD_CHANNEL_IDS: csv, // empty = any channel
   DISCORD_OPEN_CHANNEL_IDS: csv, // respond to every message (no mention needed)
-  DISCORD_ALLOWED_USER_IDS: csv, // empty = everyone
+  DISCORD_ALLOWED_USER_IDS: csv, // guilds: empty = everyone; DMs (allowlist policy): empty = admins only
   DISCORD_ADMIN_USER_IDS: csv,
   DISCORD_ADMIN_ROLE_IDS: csv,
   DM_POLICY: z.enum(["off", "allowlist", "open"]).default("allowlist"),
