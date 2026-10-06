@@ -121,7 +121,7 @@ export async function startDiscord(
     const decision = gate(config, message as unknown as IngressMessage, {
       botUserId: client.user.id,
       isBotThread: (id) => store.isBotThread(id),
-      hasRoute: (r) => !!store.get(routeKeyString(r)),
+      hasRoute: (r) => !!store.get(routeKeyString(r)) || !!store.pinnedLastActive(routeKeyString(r)),
     });
     if (!decision.accept) {
       log.debug("ignored message", { id: message.id, reason: decision.reason });
@@ -155,7 +155,7 @@ export async function startDiscord(
   function routeForInteraction(i: Interaction): RouteKey | null {
     const ch = i.channel;
     if (!ch) return null;
-    if (ch.isDMBased()) return { guildId: null, channelId: ch.id, threadId: null };
+    if (ch.isDMBased()) return { guildId: null, channelId: ch.id, threadId: null, userId: i.user.id };
     if (ch.isThread()) return { guildId: i.guildId, channelId: ch.parentId ?? ch.id, threadId: ch.id };
     return { guildId: i.guildId, channelId: ch.id, threadId: null };
   }

@@ -5,8 +5,9 @@ import {
   type LettaCodeSession,
   type SDKMessage,
 } from "@letta-ai/letta-agent-sdk";
-import { replyModeFor, type Config } from "../config.ts";
+import { replyModeFor, type Config, type ReplyMode } from "../config.ts";
 import { log } from "../log.ts";
+import { resolveRoute, type RoutingTable } from "../routing.ts";
 import {
   routeKeyString,
   type AgentBridge,
@@ -34,6 +35,8 @@ export interface BridgeDeps {
   client?: LettaClientLike;
   store?: RouteStore;
   toolFactory?: ToolFactory;
+  /** Pins Discord surfaces to existing conversations. Null = one conversation per route. */
+  routes?: RoutingTable | null;
   /** Override for tests. */
   now?: () => number;
 }
@@ -43,10 +46,20 @@ interface QueuedTurn {
   ctx: TurnContext;
 }
 
-interface RouteState {
+/**
+ * One conversation and the session that drives it. Unpinned routes each get a
+ * lane of their own. Routes the routing table pins to the same conversation
+ * share a lane, so their turns run one at a time.
+ */
+interface LaneState {
   key: string;
+  /** The route that opened the lane. Turns carry their own route in `current`. */
   route: RouteKey;
+  /** Routing-table rule, when the conversation is pinned. A pinned lane never replaces its conversation. */
+  pinnedBy: string | null;
   session: LettaCodeSession | null;
+  /** Reply mode the session's tools were built for. */
+  sessionMode: ReplyMode | null;
   conversationId: string | null;
   model?: string;
   busy: boolean;
@@ -111,32 +124,47 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
   const client: LettaClientLike =
     deps.client ?? (new LettaAgentClient(clientOptions(config)) as unknown as LettaClientLike);
   const store = deps.store ?? new RouteStore(config.DATA_DIR);
-  const routes = new Map<string, RouteState>();
+  const lanes = new Map<string, LaneState>();
   let shuttingDown = false;
 
-  function state(route: RouteKey): RouteState {
-    const key = routeKeyString(route);
-    let s = routes.get(key);
+  function laneKey(route: RouteKey): { key: string; target: ReturnType<typeof resolveRoute> } {
+    const target = resolveRoute(deps.routes, route);
+    return { key: target.kind === "pinned" ? `pin:${target.conversationId}` : routeKeyString(route), target };
+  }
+
+  function existingLane(route: RouteKey): LaneState | undefined {
+    return lanes.get(laneKey(route).key);
+  }
+
+  function lane(route: RouteKey): LaneState {
+    const { key, target } = laneKey(route);
+    let s = lanes.get(key);
     if (!s) {
+      const pinned = target.kind === "pinned";
       s = {
         key,
         route,
+        pinnedBy: pinned ? target.rule : null,
         session: null,
-        conversationId: store.get(key)?.conversationId ?? null,
+        sessionMode: null,
+        conversationId: pinned ? target.conversationId : (store.get(key)?.conversationId ?? null),
         busy: false,
         queue: [],
         current: null,
         idleTimer: null,
         aborted: false,
       };
-      routes.set(key, s);
+      lanes.set(key, s);
     }
     return s;
   }
 
-  /** Drop queued turns, telling each one it was interrupted so its renderer settles. */
-  function dropQueue(s: RouteState): number {
-    const dropped = s.queue.splice(0, s.queue.length);
+  const sameRoute = (a: RouteKey, b: RouteKey) => routeKeyString(a) === routeKeyString(b);
+
+  /** Drop queued turns (only `route`'s, when given), telling each one it was interrupted so its renderer settles. */
+  function dropQueue(s: LaneState, route?: RouteKey): number {
+    const dropped = route ? s.queue.filter((it) => sameRoute(it.ctx.route, route)) : s.queue.splice(0, s.queue.length);
+    if (route) s.queue = s.queue.filter((it) => !sameRoute(it.ctx.route, route));
     for (const it of dropped) {
       try {
         it.ctx.onEvent({ kind: "done", success: false, errorCode: "interrupted", durationMs: 0 });
@@ -145,9 +173,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     return dropped.length;
   }
 
-  function closeSession(s: RouteState, reason: string) {
+  function closeSession(s: LaneState, reason: string) {
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.idleTimer = null;
+    s.sessionMode = null;
     if (s.session) {
       log.debug("closing session", { route: s.key, reason });
       try {
@@ -159,7 +188,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     }
   }
 
-  function armIdle(s: RouteState) {
+  function armIdle(s: LaneState) {
     if (s.idleTimer) clearTimeout(s.idleTimer);
     const ms = config.SESSION_IDLE_MINUTES * 60_000;
     if (ms <= 0) return;
@@ -169,8 +198,8 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     s.idleTimer.unref?.();
   }
 
-  async function ensureConversation(s: RouteState, ctx: TurnContext): Promise<boolean> {
-    if (s.conversationId) return false;
+  async function ensureConversation(s: LaneState, ctx: TurnContext): Promise<boolean> {
+    if (s.conversationId || s.pinnedBy) return false;
     const conv = await client.conversations.create({
       agentId: config.LETTA_AGENT_ID,
       summary: `discord:${s.key}`,
@@ -182,7 +211,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     return true;
   }
 
-  function canUseTool(s: RouteState): CanUseToolCallback {
+  function canUseTool(s: LaneState): CanUseToolCallback {
     return async (toolName, toolInput, context) => {
       const turn = s.current;
       // Speaking in a tool-mode channel must never wait on an approver. The tool
@@ -193,7 +222,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       }
       try {
         const decision = await turn.requestApproval({
-          route: s.route,
+          route: turn.route,
           requesterId: turn.requesterId,
           toolName,
           toolInput,
@@ -209,7 +238,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     };
   }
 
-  async function ensureSession(s: RouteState): Promise<LettaCodeSession> {
+  async function ensureSession(s: LaneState, route: RouteKey, mode: ReplyMode): Promise<LettaCodeSession> {
+    // A pinned lane can serve routes with different reply modes, and the tool
+    // set is fixed per session, so switch sessions when the mode changes.
+    if (s.session && s.sessionMode !== mode) closeSession(s, "reply mode changed");
     if (s.session) return s.session;
     const conversationId = s.conversationId!;
     // Sandbox file client is only known after the session exists, so tools
@@ -227,7 +259,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     };
     const tools =
       deps.toolFactory
-        ? deps.toolFactory(s.route, () => s.current, config.LETTA_COMPUTER ? null : sandboxProxy)
+        ? deps.toolFactory(route, () => s.current, config.LETTA_COMPUTER ? null : sandboxProxy)
         : [];
     const allowedTools =
       config.ALLOWED_TOOLS.length > 0 ? [...new Set([...config.ALLOWED_TOOLS, ...tools.map((t) => t.name)])] : undefined;
@@ -238,7 +270,8 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       ...(allowedTools ? { allowedTools } : {}),
       ...(config.TOOLSET_BASE ? { toolset: { base: config.TOOLSET_BASE } } : {}),
     };
-    const session = client.resumeSession(conversationId, options);
+    // The SDK resumes an agent's default conversation when given the agent id.
+    const session = client.resumeSession(conversationId === "default" ? config.LETTA_AGENT_ID : conversationId, options);
     const info = await session.ready().catch((err: unknown) => {
       // Never pooled in s.session, so nothing else would close it.
       try {
@@ -249,12 +282,13 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     sandboxRef = (session.sandbox as SandboxFiles | undefined) ?? null;
     s.model = info.model;
     s.session = session;
-    log.info("session ready", { route: s.key, conversationId, model: info.model, sandbox: !!sandboxRef });
+    s.sessionMode = mode;
+    log.info("session ready", { route: s.key, conversationId, model: info.model, sandbox: !!sandboxRef, mode });
     return session;
   }
 
   async function uploadFiles(
-    s: RouteState,
+    s: LaneState,
     session: LettaCodeSession,
     batch: InboundMessage[],
     emit: (e: TurnEvent) => void,
@@ -354,7 +388,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     }
   }
 
-  async function runTurn(s: RouteState, batch: InboundMessage[], ctx: TurnContext): Promise<void> {
+  async function runTurn(s: LaneState, batch: InboundMessage[], ctx: TurnContext): Promise<void> {
     const emit = (e: TurnEvent) => {
       try {
         ctx.onEvent(e);
@@ -376,14 +410,15 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     // Signal the turn immediately so Discord shows typing while the
     // conversation and sandbox spin up (session start can take 10s+).
     emit({ kind: "started", conversationId: s.conversationId ?? "", createdConversation: !s.conversationId });
+    const mode = replyModeFor(config, ctx.route);
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         await ensureConversation(s, ctx);
-        const session = await ensureSession(s);
+        const session = await ensureSession(s, ctx.route, mode);
         if (interruptedDuringSetup()) return;
         const attachments = await uploadFiles(s, session, batch, emit);
         if (interruptedDuringSetup()) return;
-        await session.send(buildSendMessage(batch, attachments, replyModeFor(config, s.route)));
+        await session.send(buildSendMessage(batch, attachments, mode));
         let terminal = false;
         for await (const msg of session.stream()) {
           if (mapMessage(msg, emit, acted)) {
@@ -398,13 +433,25 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
           }
           throw new Error("stream ended without a result");
         }
-        store.touch(s.key);
+        if (s.pinnedBy) store.touchPinned(routeKeyString(ctx.route));
+        else store.touch(s.key);
         s.lastActiveAt = new Date().toISOString();
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.warn("turn failed", { route: s.key, attempt, err: message });
         closeSession(s, "error");
+        if (s.pinnedBy && s.conversationId && isConversationMissing(err, s.conversationId)) {
+          // Never replace a pinned conversation: that would silently fork the
+          // operator's history. Fail loudly and leave the table to be fixed.
+          log.error("pinned conversation not found; fix ROUTES_FILE", {
+            conversationId: s.conversationId,
+            rule: s.pinnedBy,
+          });
+          emit({ kind: "error", message: `Pinned conversation ${s.conversationId} (${s.pinnedBy}) was not found.` });
+          emit({ kind: "done", success: false, errorCode: "error", durationMs: 0 });
+          return;
+        }
         if (s.conversationId && isConversationMissing(err, s.conversationId)) {
           // Conversation was deleted on the Letta side; start fresh next attempt.
           store.delete(s.key);
@@ -419,13 +466,17 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     }
   }
 
-  async function drain(s: RouteState) {
+  async function drain(s: LaneState) {
     if (s.busy) return;
     s.busy = true;
     try {
       while (s.queue.length > 0 && !shuttingDown) {
-        // Merge everything queued so far into one turn; the newest context renders the reply.
-        const items = s.queue.splice(0, s.queue.length);
+        // Merge the queued run from the same route into one turn; the newest
+        // context renders the reply. A shared lane never merges across routes.
+        const first = s.queue[0]!.ctx.route;
+        let n = 1;
+        while (n < s.queue.length && sameRoute(s.queue[n]!.ctx.route, first)) n++;
+        const items = s.queue.splice(0, n);
         const last = items[items.length - 1]!;
         for (const it of items.slice(0, -1)) {
           try {
@@ -448,16 +499,17 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
   return {
     async submit(batch, ctx) {
       if (shuttingDown || batch.length === 0) return;
-      const s = state(ctx.route);
+      const s = lane(ctx.route);
       s.queue.push({ batch, ctx });
       await drain(s);
     },
 
     async cancel(route) {
-      const s = routes.get(routeKeyString(route));
+      const s = existingLane(route);
       if (!s) return false;
-      const hadQueue = dropQueue(s) > 0;
-      if (!s.busy) return hadQueue;
+      const hadQueue = dropQueue(s, route) > 0;
+      // In a shared lane, only cancel the running turn if it belongs to this route.
+      if (!s.busy || !s.current || !sameRoute(s.current.route, route)) return hadQueue;
       s.aborted = true;
       // Still creating the conversation or sandbox: runTurn stops before sending.
       if (!s.session) return true;
@@ -470,8 +522,9 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     },
 
     async reset(route) {
+      if (resolveRoute(deps.routes, route).kind === "pinned") return "pinned";
       const key = routeKeyString(route);
-      const s = routes.get(key);
+      const s = lanes.get(key);
       if (s) {
         dropQueue(s);
         if (s.busy) {
@@ -482,20 +535,25 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         s.conversationId = null;
       }
       store.delete(key);
+      return "reset";
     },
 
     async status(route, admin): Promise<RouteStatus> {
       const key = routeKeyString(route);
-      const s = routes.get(key);
-      const rec = store.get(key);
+      const target = resolveRoute(deps.routes, route);
+      const s = existingLane(route);
+      const pinned = target.kind === "pinned";
+      const rec = pinned ? null : store.get(key);
+      const lastActiveAt = s?.lastActiveAt ?? (pinned ? store.pinnedLastActive(key) : rec?.lastActiveAt);
       return {
         busy: !!s?.busy,
-        queued: s?.queue.length ?? 0,
-        hasConversation: !!(s?.conversationId ?? rec?.conversationId),
-        ...(s?.lastActiveAt || rec?.lastActiveAt ? { lastActiveAt: s?.lastActiveAt ?? rec?.lastActiveAt } : {}),
+        queued: s?.queue.filter((it) => sameRoute(it.ctx.route, route)).length ?? 0,
+        hasConversation: pinned || !!(s?.conversationId ?? rec?.conversationId),
+        ...(pinned ? { pinnedBy: target.rule } : {}),
+        ...(lastActiveAt ? { lastActiveAt } : {}),
         ...(admin
           ? {
-              conversationId: s?.conversationId ?? rec?.conversationId,
+              conversationId: pinned ? target.conversationId : (s?.conversationId ?? rec?.conversationId),
               model: s?.model,
             }
           : {}),
@@ -505,7 +563,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     async shutdown() {
       shuttingDown = true;
       await Promise.all(
-        [...routes.values()].map(async (s) => {
+        [...lanes.values()].map(async (s) => {
           dropQueue(s);
           if (s.busy && s.session) await s.session.abort().catch(() => {});
           closeSession(s, "shutdown");

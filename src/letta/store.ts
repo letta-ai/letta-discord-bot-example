@@ -27,6 +27,12 @@ export class RouteStore {
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     )`);
+    // Routes pinned by the routing table. Their conversation comes from the
+    // table, so only activity is recorded (it lets follow-ups skip the mention).
+    this.db.exec(`CREATE TABLE IF NOT EXISTS pinned_routes (
+      route_key TEXT PRIMARY KEY,
+      last_active_at TEXT NOT NULL
+    )`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS bot_threads (
       thread_id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL
@@ -70,6 +76,21 @@ export class RouteStore {
 
   count(): number {
     return this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM routes").get()?.n ?? 0;
+  }
+
+  touchPinned(routeKey: string): void {
+    this.db
+      .query(
+        `INSERT INTO pinned_routes (route_key, last_active_at) VALUES (?1, ?2)
+         ON CONFLICT(route_key) DO UPDATE SET last_active_at = ?2`,
+      )
+      .run(routeKey, new Date().toISOString());
+  }
+
+  pinnedLastActive(routeKey: string): string | undefined {
+    return this.db
+      .query<{ last_active_at: string }, [string]>("SELECT last_active_at FROM pinned_routes WHERE route_key = ?")
+      .get(routeKey)?.last_active_at;
   }
 
   /** Threads the bot created or adopted; follow-ups there need no mention. */

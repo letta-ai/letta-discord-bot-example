@@ -175,3 +175,13 @@ describe("reply modes", () => {
     expect(replyModeFor({ ...tool, OPEN_CHANNEL_REPLY_MODE: "relay" }, route)).toBe("relay");
   });
 });
+
+test("tools act on the route of the turn being run, not the session's first route", async () => {
+  const h = harness();
+  const other: RouteKey = { guildId: "g", channelId: "parent", threadId: "elsewhere" };
+  let current: TurnContext = turn();
+  const tools = createDiscordToolFactory({ client: h.client, config })(route, () => current, null);
+  current = { ...turn(), route: other };
+  await tools.find((t) => t.name === "discord_send_message")!.execute("call", { content: "hi" });
+  expect(h.channelIds).toEqual(["elsewhere"]);
+});

@@ -20,7 +20,8 @@ Shared contract: `src/types.ts`, `src/config.ts`, `src/log.ts`. Do not change th
 | Path | Owner lane | Responsibility |
 |---|---|---|
 | `src/types.ts`, `src/config.ts`, `src/log.ts`, `src/index.ts`, `src/health.ts` | coordinator | contract + wiring |
-| `src/letta/store.ts` | letta lane | `bun:sqlite` route index: routeKey -> conversationId, createdAt, lastActiveAt |
+| `src/letta/store.ts` | letta lane | `bun:sqlite` route index: routeKey -> conversationId, createdAt, lastActiveAt; pinned-route activity |
+| `src/routing.ts` | coordinator | `ROUTES_FILE` routing table: parse/validate, `resolveRoute(table, route)` |
 | `src/letta/envelope.ts` | letta lane | build the `<channel-notification>` XML envelope + multimodal `SendMessage` |
 | `src/letta/session-pool.ts` | letta lane | one `LettaAgentClient`; open/resume sessions per conversation; idle close |
 | `src/letta/bridge.ts` | letta lane | `createAgentBridge(config, deps): AgentBridge` |
@@ -48,6 +49,11 @@ Routing
 - Ignore own messages always; other bots unless `RESPOND_TO_BOTS`.
 
 Letta
+- Lanes: the bridge serializes turns per lane. Unpinned route = its own lane (conversation from the store or created).
+  A route the routing table pins resolves to lane `pin:<conversationId>`, shared by every route pinned there.
+  Queued turns merge only within the same route. Tools, approvals and the envelope use the turn's route. The
+  session is rebuilt if the lane's next turn needs a different reply mode (tool set). `default` resumes via
+  the agent id. Pinned conversations are never created, replaced on 404, or reset by `/new`.
 - Unknown route: `client.conversations.create({ agent_id, summary: "discord:<routeKey>", hidden?: ... })` honoring
   `CONVERSATION_MODEL` as an operator pin. Store mapping. Then `client.resumeSession(conversationId, opts)`.
 - Session options: `permissionMode`, `allowedTools` (when non-empty, union with enabled discord tool names),

@@ -5,6 +5,7 @@ import { startHealthServer } from "./health.ts";
 import { createAgentBridge } from "./letta/bridge.ts";
 import { RouteStore } from "./letta/store.ts";
 import { log, setLogLevel } from "./log.ts";
+import { loadRoutingTable, pinnedConversations } from "./routing.ts";
 
 async function main() {
   const config = loadConfig();
@@ -16,10 +17,21 @@ async function main() {
     });
   }
 
+  const routes = loadRoutingTable(config.ROUTES_FILE);
+  if (routes) {
+    log.info("routing table loaded", {
+      file: config.ROUTES_FILE,
+      rules: routes.routes.length,
+      fallback: routes.fallback ?? "auto",
+      conversations: pinnedConversations(routes),
+    });
+  }
+
   const store = new RouteStore(config.DATA_DIR);
   const client = createDiscordClient();
   const bridge = createAgentBridge(config, {
     store,
+    routes,
     toolFactory: createDiscordToolFactory({ client: client as never, config }),
   });
 

@@ -11,7 +11,9 @@ function fakeBridge(overrides: Partial<AgentBridge> = {}): AgentBridge {
     async cancel() {
       return false;
     },
-    async reset() {},
+    async reset() {
+      return "reset" as const;
+    },
     async status() {
       return { busy: false, queued: 0, hasConversation: false };
     },
@@ -87,6 +89,7 @@ describe("command handling", () => {
     const bridge = fakeBridge({
       async reset() {
         touched.push("reset");
+        return "reset" as const;
       },
       async cancel() {
         touched.push("cancel");
@@ -118,6 +121,7 @@ describe("command handling", () => {
         fakeBridge({
           async reset(value) {
             resetRoute = value;
+            return "reset" as const;
           },
         }),
       ),
@@ -187,4 +191,23 @@ describe("command handling", () => {
     expect(i.replies[0]!.content).toContain("attach images or files");
     expect(i.replies[0]!.content).toContain("managed by its operator in Letta");
   });
+});
+
+test("/new refuses on a pinned route and /status names the rule", async () => {
+  const bridge = fakeBridge({
+    async reset() {
+      return "pinned" as const;
+    },
+    async status() {
+      return { busy: false, queued: 0, hasConversation: true, pinnedBy: "channel:111" };
+    },
+  });
+  const n = interaction("new");
+  await handleCommand(n.value, deps(bridge));
+  expect(n.replies).toEqual([
+    { content: "This channel is pinned to a conversation by the routing table, so /new is disabled here.", ephemeral: true },
+  ]);
+  const st = interaction("status");
+  await handleCommand(st.value, deps(bridge));
+  expect(st.replies[0]!.content).toContain("Conversation: pinned (channel:111)");
 });

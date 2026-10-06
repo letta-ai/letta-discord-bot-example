@@ -10,6 +10,7 @@ export interface RouteKey {
   guildId: string | null; // null for DMs
   channelId: string; // parent channel (or DM channel)
   threadId: string | null; // thread id when the surface is a thread
+  userId?: string; // DMs: the other user. Used by routing-table `dm` rules, not part of the key.
 }
 
 export function routeKeyString(k: RouteKey): string {
@@ -119,10 +120,13 @@ export interface AgentBridge {
    * running are queued and merged into the next turn.
    */
   submit(batch: InboundMessage[], ctx: TurnContext): Promise<void>;
-  /** Abort the in-flight turn on this route, if any. Returns true if aborted. */
+  /** Abort this route's in-flight or queued turns, if any. Returns true if anything was cancelled. */
   cancel(route: RouteKey): Promise<boolean>;
-  /** Forget the route -> conversation mapping so the next message starts fresh. */
-  reset(route: RouteKey): Promise<void>;
+  /**
+   * Forget the route -> conversation mapping so the next message starts fresh.
+   * Routes the routing table pins are left alone and report "pinned".
+   */
+  reset(route: RouteKey): Promise<"reset" | "pinned">;
   /** Safe, user-visible status (no ids unless admin=true). */
   status(route: RouteKey, admin: boolean): Promise<RouteStatus>;
   shutdown(): Promise<void>;
@@ -132,6 +136,7 @@ export interface RouteStatus {
   busy: boolean;
   queued: number;
   hasConversation: boolean;
+  pinnedBy?: string; // routing-table rule, e.g. "channel:123" or "fallback"
   conversationId?: string; // admin only
   model?: string; // admin only
   lastActiveAt?: string;

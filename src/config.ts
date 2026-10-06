@@ -41,6 +41,7 @@ export const ConfigSchema = z.object({
   ALLOWED_TOOLS: csv, // empty = harness default toolset
   TOOLSET_BASE: z.enum(["auto", "default", "codex", "gemini", "none"]).optional(),
   CONVERSATION_MODEL: z.string().optional(), // pinned at conversation create
+  ROUTES_FILE: z.string().optional(), // JSON routing table pinning Discord surfaces to existing conversations
   APPROVAL_MODE: z.enum(["deny", "admins", "requester", "allow"]).default("admins"),
   APPROVAL_TIMEOUT_SECONDS: int(300),
   TURN_TIMEOUT_SECONDS: int(900), // whole turn, including approval waits

@@ -71,12 +71,15 @@ export async function handleCommand(
   }
 
   switch (interaction.commandName) {
-    case "new":
-      await deps.bridge.reset(route);
-      await interaction.reply({
-        content: "Started a fresh conversation here. The agent still remembers what it has learned.",
-      });
+    case "new": {
+      const result = await deps.bridge.reset(route);
+      await interaction.reply(
+        result === "pinned"
+          ? { content: "This channel is pinned to a conversation by the routing table, so /new is disabled here.", ephemeral: true }
+          : { content: "Started a fresh conversation here. The agent still remembers what it has learned." },
+      );
       return true;
+    }
 
     case "cancel": {
       const cancelled = await deps.bridge.cancel(route);
@@ -90,7 +93,7 @@ export async function handleCommand(
       const lines = [
         `Status: ${status.busy ? "busy" : "idle"}`,
         `Queued: ${status.queued}`,
-        `Conversation: ${status.hasConversation ? "yes" : "no"}`,
+        `Conversation: ${status.pinnedBy ? `pinned (${status.pinnedBy})` : status.hasConversation ? "yes" : "no"}`,
         `Last active: ${status.lastActiveAt ?? "never"}`,
       ];
       if (admin) {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage } from "@letta-ai/letta-agent-sdk";
 import { loadConfig } from "../src/config.ts";
+import { parseRoutingTable } from "../src/routing.ts";
 import { TOOL_MODE_PREAMBLE, UNTRUSTED_PREAMBLE } from "../src/letta/envelope.ts";
 import { clientOptions, createAgentBridge, type LettaClientLike } from "../src/letta/bridge.ts";
 import { RouteStore } from "../src/letta/store.ts";
@@ -16,9 +17,9 @@ const config = loadConfig({
 
 const route: RouteKey = { guildId: "g", channelId: "c", threadId: "t" };
 
-function inbound(id: string, text: string, files: InboundMessage["files"] = []): InboundMessage {
+function inbound(id: string, text: string, files: InboundMessage["files"] = [], r: RouteKey = route): InboundMessage {
   return {
-    route,
+    route: r,
     messageId: id,
     authorId: "u1",
     authorName: "Ann",
@@ -33,7 +34,7 @@ function inbound(id: string, text: string, files: InboundMessage["files"] = []):
 type Script = (sent: unknown, n: number) => SDKMessage[] | Error;
 
 function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean; readyGate?: Promise<void> } = {}) {
-  const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any };
+  const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any, resumedIds: [] as string[] };
   let readyFails = opts.failReadyOnce ? 1 : 0;
   const client: LettaClientLike = {
     conversations: {
@@ -44,6 +45,7 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
     },
     resumeSession(_id, options) {
       calls.resumes++;
+      calls.resumedIds.push(_id);
       calls.canUseTool = options?.canUseTool;
       let queue: SDKMessage[] = [];
       let release: (() => void) | null = null;
@@ -97,12 +99,12 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
   return { client, calls };
 }
 
-function ctxCollector(id = "m1"): { ctx: TurnContext; events: TurnEvent[] } {
+function ctxCollector(id = "m1", r: RouteKey = route): { ctx: TurnContext; events: TurnEvent[] } {
   const events: TurnEvent[] = [];
   return {
     events,
     ctx: {
-      route,
+      route: r,
       triggerMessageId: id,
       requesterId: "u1",
       onEvent: (e) => events.push(e),
@@ -418,3 +420,132 @@ describe("clientOptions", () => {
   });
 });
 
+
+describe("routing table lanes", () => {
+  const chanA: RouteKey = { guildId: "g", channelId: "111", threadId: null };
+  const threadA: RouteKey = { guildId: "g", channelId: "111", threadId: "112" };
+  const chanB: RouteKey = { guildId: "g", channelId: "222", threadId: null };
+  const dm: RouteKey = { guildId: null, channelId: "d", threadId: null, userId: "333" };
+  const table = parseRoutingTable(
+    JSON.stringify({
+      routes: [
+        { channel: "111", conversation: "conv-shared" },
+        { channel: "222", conversation: "conv-shared" },
+        { dm: "333", conversation: "default" },
+      ],
+    }),
+  );
+  const submit = (bridge: ReturnType<typeof createAgentBridge>, id: string, r: RouteKey) => {
+    const c = ctxCollector(id, r);
+    return { c, done: bridge.submit([inbound(id, `hi ${id}`, [], r)], c.ctx) };
+  };
+
+  test("pinned routes resume the existing conversation and never create one", async () => {
+    const store = new RouteStore(":memory:");
+    const { client, calls } = fakeClient(() => ok("hi"));
+    const bridge = createAgentBridge(config, { client, store, routes: table });
+    await submit(bridge, "m1", threadA).done;
+
+    expect(calls.creates).toBe(0);
+    expect(calls.resumedIds).toEqual(["conv-shared"]);
+    expect(store.get("g:111:112")).toBeNull(); // the table, not the store, owns the mapping
+    expect(store.pinnedLastActive("g:111:112")).toBeTruthy(); // follow-ups skip the mention
+  });
+
+  test("a default target resumes the agent's default conversation", async () => {
+    const { client, calls } = fakeClient(() => ok("hi"));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:"), routes: table });
+    await submit(bridge, "m1", dm).done;
+    expect(calls.resumedIds).toEqual(["agent-123"]);
+    expect(calls.creates).toBe(0);
+  });
+
+  test("routes sharing a conversation share one session, run in turn, and never merge", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { client, calls } = fakeClient(() => ok("hi"), { readyGate: gate });
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:"), routes: table });
+    const a = submit(bridge, "a1", chanA);
+    const b1 = submit(bridge, "b1", chanB);
+    const b2 = submit(bridge, "b2", chanB);
+    const a2 = submit(bridge, "a2", chanA); // queued behind b1, b2
+    release();
+    await Promise.all([a.done, b1.done, b2.done, a2.done]);
+
+    expect(calls.resumes).toBe(1);
+    // a1 alone, then b1+b2 merged, then a2: a reply never lands in the wrong channel.
+    expect(calls.sends).toHaveLength(3);
+    expect(String(calls.sends[0])).toContain('chat_id="111"');
+    expect(String(calls.sends[0])).not.toContain("hi b1");
+    expect(String(calls.sends[1])).toContain('chat_id="222"');
+    expect(String(calls.sends[1])).toContain("hi b1");
+    expect(String(calls.sends[1])).toContain("hi b2");
+    expect(String(calls.sends[1])).not.toContain("hi a2");
+    expect(String(calls.sends[2])).toContain('chat_id="111"');
+    expect(b1.c.events).toEqual([{ kind: "merged", intoMessageId: "b2" }]);
+    expect(a2.c.events.at(-1)).toMatchObject({ kind: "done", success: true });
+  });
+
+  test("a missing pinned conversation fails loudly instead of being replaced", async () => {
+    const { client, calls } = fakeClient(() => new Error("Conversation conv-shared not found (404)"));
+    const store = new RouteStore(":memory:");
+    const bridge = createAgentBridge(config, { client, store, routes: table });
+    const a = submit(bridge, "m1", chanA);
+    await a.done;
+
+    expect(calls.creates).toBe(0);
+    expect(calls.sends).toHaveLength(1); // no retry against a fresh conversation
+    expect(a.c.events).toContainEqual({ kind: "error", message: "Pinned conversation conv-shared (channel:111) was not found." });
+    expect(a.c.events.at(-1)).toMatchObject({ kind: "done", success: false });
+  });
+
+  test("/new leaves pinned routes alone; /cancel only touches its own route", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { client, calls } = fakeClient(() => ok("hi"), { readyGate: gate });
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:"), routes: table });
+    expect(await bridge.reset(chanA)).toBe("pinned");
+    expect(await bridge.reset(route)).toBe("reset");
+
+    const a = submit(bridge, "a1", chanA);
+    const b = submit(bridge, "b1", chanB);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await bridge.cancel(chanB)).toBe(true); // drops b1 from the queue
+    release();
+    await Promise.all([a.done, b.done]);
+
+    expect(b.c.events).toEqual([{ kind: "done", success: false, errorCode: "interrupted", durationMs: 0 }]);
+    expect(a.c.events.at(-1)).toMatchObject({ kind: "done", success: true }); // a1 was not aborted
+    expect(calls.aborts).toBe(0);
+    expect(await bridge.status(chanA, true)).toMatchObject({ pinnedBy: "channel:111", conversationId: "conv-shared" });
+  });
+
+  test("the session is rebuilt when a shared lane switches reply modes", async () => {
+    const toolConfig = loadConfig({
+      DISCORD_BOT_TOKEN: "x",
+      LETTA_API_KEY: "y",
+      LETTA_AGENT_ID: "agent-123",
+      SESSION_IDLE_MINUTES: "0",
+      DISCORD_OPEN_CHANNEL_IDS: "111",
+      OPEN_CHANNEL_REPLY_MODE: "tool",
+    });
+    const built: string[][] = [];
+    const { client, calls } = fakeClient(() => ok("hi"));
+    const bridge = createAgentBridge(toolConfig, {
+      client,
+      store: new RouteStore(":memory:"),
+      routes: table,
+      toolFactory: (r) => {
+        const names = r.channelId === "111" ? ["discord_send_message"] : [];
+        built.push(names);
+        return names.map((name) => ({ name }) as never);
+      },
+    });
+    await submit(bridge, "a1", chanA).done; // tool mode
+    await submit(bridge, "a2", chanA).done; // same mode, same session
+    await submit(bridge, "b1", chanB).done; // relay: new session
+
+    expect(calls.resumes).toBe(2);
+    expect(built).toEqual([["discord_send_message"], []]);
+  });
+});

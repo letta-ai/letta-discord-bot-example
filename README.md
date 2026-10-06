@@ -142,6 +142,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `ALLOWED_TOOLS` | empty (CSV) | Tool allowlist. Empty uses the harness default toolset. |
 | `TOOLSET_BASE` | unset | `auto`, `default`, `codex`, `gemini` or `none`. |
 | `CONVERSATION_MODEL` | unset | Model pinned when a conversation is created. |
+| `ROUTES_FILE` | unset | JSON routing table that pins Discord surfaces to existing conversations, see Routing table. |
 | `APPROVAL_MODE` | `admins` | `deny`, `admins`, `requester` or `allow`. |
 | `APPROVAL_TIMEOUT_SECONDS` | `300` | How long an approval stays clickable, then deny. |
 | `TURN_TIMEOUT_SECONDS` | `900` | Longest a whole turn may run, approval waits included. Must exceed `APPROVAL_TIMEOUT_SECONDS`. The SDK's own default is 2 minutes. |
@@ -210,6 +211,39 @@ conversation owns one Cloud sandbox. Only one turn per route runs at a time; mes
 mid-turn are queued and merged into the next turn. `/new` drops the mapping so the next message
 starts a fresh conversation (the old one stays in Letta).
 
+### Routing table
+
+To send Discord traffic into conversations that already exist (the agent's default conversation, or
+one your other tools already use), point `ROUTES_FILE` at a JSON file like
+[`routes.example.json`](routes.example.json):
+
+```json
+{
+  "routes": [
+    { "channel": "123456789012345678", "conversation": "conv-..." },
+    { "thread": "223456789012345678", "conversation": "conv-..." },
+    { "dm": "323456789012345678", "conversation": "default" },
+    { "channel": "423456789012345678", "conversation": "auto" }
+  ],
+  "fallback": "auto"
+}
+```
+
+- Each rule matches one `thread`, `channel` (including threads under it), `dm` (by user id), or
+  `guild`. The most specific match wins, in that order, then `fallback`.
+- `conversation` is a `conv-...` id, `default` for the agent's default conversation, or `auto` for
+  the usual conversation per route. `auto` exempts a surface from a broader rule.
+- Several surfaces may share a conversation. Their turns run one at a time, each message carries
+  its channel and thread ids, and replies always go back where the message came from.
+- A pinned conversation is never replaced. If Letta reports it missing, the turn fails with an error
+  instead of starting a new one, and `/new` is disabled on pinned routes. `/status` shows the rule.
+- The table only chooses conversations. Which messages the bot answers is still set by the gating
+  options above. Model, memory, and schedules stay whatever the conversation and agent already have.
+
+`bun run doctor` checks that the file parses and that every pinned conversation exists and belongs
+to `LETTA_AGENT_ID`. The listener refuses to start with an invalid table. Combine with
+`LETTA_COMPUTER` to keep execution on your own machine.
+
 ## ✅ Approvals
 
 `APPROVAL_MODE` decides who signs off on a tool call. A request shows the tool name and a compact
@@ -244,7 +278,7 @@ in the sandbox:
 
 | Command | Effect |
 |---|---|
-| `/new` | Forget this route, next message starts a new conversation. |
+| `/new` | Forget this route, next message starts a new conversation. Disabled on pinned routes. |
 | `/cancel` | Abort the running turn. |
 | `/status` | Ephemeral status for the route. Ids and model are shown to admins only. |
 | `/help` | Short usage reminder. |

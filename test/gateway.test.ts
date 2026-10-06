@@ -51,7 +51,9 @@ function recordingBridge(submitted: string[][]): AgentBridge {
     async cancel() {
       return false;
     },
-    async reset() {},
+    async reset() {
+      return "reset" as const;
+    },
     async status() {
       return { busy: false, queued: 0, hasConversation: false };
     },

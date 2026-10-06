@@ -108,7 +108,7 @@ export function gate(config: Config, msg: IngressMessage, deps: GateDeps): GateD
   if (isDM) {
     return {
       accept: true,
-      route: { guildId: null, channelId: msg.channel.id, threadId: null },
+      route: { guildId: null, channelId: msg.channel.id, threadId: null, userId: msg.author.id },
       needsThread: false,
       mentioned,
     };

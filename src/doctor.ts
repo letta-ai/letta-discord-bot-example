@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { LettaAgentClient } from "@letta-ai/letta-agent-sdk";
 import { PermissionFlagsBits, PermissionsBitField } from "discord.js";
 import { loadConfig, type Config } from "./config.ts";
+import { readFileSync } from "node:fs";
+import { parseRoutingTable, pinnedConversations, type RoutingTable } from "./routing.ts";
 
 export type CheckStatus = "PASS" | "WARN" | "FAIL";
 
@@ -386,6 +388,54 @@ export async function checkLetta(fetchImpl: DoctorFetch, config: Config): Promis
   }
 }
 
+/**
+ * ROUTES_FILE must parse, and every pinned conversation must exist and belong
+ * to LETTA_AGENT_ID. At runtime a missing pinned conversation fails turns
+ * rather than being replaced, so catch it here first.
+ */
+export async function checkRoutingTable(fetchImpl: DoctorFetch, config: Config, readFile: (path: string) => string = (p) => readFileSync(p, "utf8")): Promise<CheckResult[]> {
+  if (!config.ROUTES_FILE) return [];
+  let table: RoutingTable;
+  try {
+    table = parseRoutingTable(readFile(config.ROUTES_FILE), config.ROUTES_FILE);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.split("\n").map((l) => l.trim()).join(" ") : String(error);
+    return [result("FAIL", "Routing table", message, "Fix ROUTES_FILE; the listener refuses to start with an invalid table.")];
+  }
+  const results: CheckResult[] = [
+    result("PASS", "Routing table", `${table.routes.length} rule(s), fallback ${table.fallback ?? "auto"}`, "No action needed."),
+  ];
+  for (const id of pinnedConversations(table)) {
+    const check = `Pinned ${id}`;
+    if (id === "default") {
+      results.push(result("PASS", check, "the agent's default conversation", "No action needed."));
+      continue;
+    }
+    try {
+      const response = await fetchImpl(`${lettaBase(config)}/v1/conversations/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${config.LETTA_API_KEY}` },
+      });
+      if (response.status === 404) {
+        results.push(result("FAIL", check, "conversation was not found (HTTP 404)", "Fix the id in ROUTES_FILE, or confirm the API key belongs to the same Letta project."));
+        continue;
+      }
+      if (!response.ok) {
+        results.push(result("FAIL", check, `request failed (HTTP ${response.status})`, "Check LETTA_API_KEY and LETTA_BASE_URL."));
+        continue;
+      }
+      const conversation = (await json<{ agent_id?: string }>(response)) ?? {};
+      results.push(
+        conversation.agent_id && conversation.agent_id !== config.LETTA_AGENT_ID
+          ? result("FAIL", check, `belongs to ${conversation.agent_id}, not LETTA_AGENT_ID`, "Pin only conversations of the configured agent.")
+          : result("PASS", check, "conversation exists", "No action needed."),
+      );
+    } catch {
+      results.push(result("FAIL", check, "could not reach the Letta API", "Check LETTA_BASE_URL and network access, then try again."));
+    }
+  }
+  return results;
+}
+
 export interface ComputerResolution {
   name?: string;
   status?: string;
@@ -539,6 +589,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<CheckResul
       ? result("FAIL", "Letta computer", "could not be checked without a valid API key", "Fix LETTA_API_KEY and run doctor again.")
       : await checkComputer(config, options.computerResolver),
   );
+  if (!lettaAuthFailed) results.push(...(await checkRoutingTable(fetchImpl, config)));
   results.push(await checkTranscription(fetchImpl, config));
   results.push(await checkDataDir(config.DATA_DIR));
   return redactResults(results, env);

@@ -4,6 +4,7 @@ import { loadConfig } from "../src/config.ts";
 import {
   checkApprovers,
   checkLetta,
+  checkRoutingTable,
   checkMessageContentIntent,
   computeEffectivePermissions,
   formatCheck,
@@ -147,4 +148,42 @@ test("a rejected Letta key is not reported as an unregistered computer", async (
   expect(computer?.status).toBe("FAIL");
   expect(computer?.hint).toContain("LETTA_API_KEY");
   expect(computer?.hint).not.toContain("LETTA_COMPUTER");
+});
+
+describe("doctor routing table", () => {
+  const file = JSON.stringify({
+    routes: [
+      { channel: "1", conversation: "conv-ok" },
+      { channel: "2", conversation: "conv-gone" },
+      { channel: "3", conversation: "conv-other" },
+    ],
+    fallback: "default",
+  });
+  const fetchImpl = (async (url: string) => {
+    const id = decodeURIComponent(String(url).split("/").pop()!);
+    if (id === "conv-gone") return new Response("{}", { status: 404 });
+    return Response.json({ id, agent_id: id === "conv-other" ? "agent-else" : "agent-test" });
+  }) as unknown as typeof fetch;
+
+  test("skips when no table is configured", async () => {
+    expect(await checkRoutingTable(fetchImpl, config())).toEqual([]);
+  });
+
+  test("checks each pinned conversation exists and belongs to the agent", async () => {
+    const results = await checkRoutingTable(fetchImpl, config({ ROUTES_FILE: "routes.json" }), () => file);
+    expect(results.map((r) => [r.check, r.status])).toEqual([
+      ["Routing table", "PASS"],
+      ["Pinned conv-ok", "PASS"],
+      ["Pinned conv-gone", "FAIL"],
+      ["Pinned conv-other", "FAIL"],
+      ["Pinned default", "PASS"],
+    ]);
+    expect(results[3]!.message).toContain("agent-else");
+  });
+
+  test("fails an unreadable or invalid table", async () => {
+    const [bad] = await checkRoutingTable(fetchImpl, config({ ROUTES_FILE: "routes.json" }), () => '{"routes":[{"channel":"x","conversation":"conv-a"}]}');
+    expect(bad).toMatchObject({ check: "Routing table", status: "FAIL" });
+    expect(bad!.message).toContain("snowflake");
+  });
 });

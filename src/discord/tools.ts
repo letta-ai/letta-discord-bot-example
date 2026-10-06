@@ -92,7 +92,12 @@ export const SEND_MESSAGE_DESCRIPTION =
  */
 export function createDiscordToolFactory(deps: { client: DiscordClientLike; config: Config }): ToolFactory {
   return (route, currentTurn, sandbox): AnyAgentTool[] => {
-    const routeChannel = async () => asChannel(await deps.client.channels.fetch(route.threadId ?? route.channelId));
+    // Routes pinned to one conversation share a session, so act on the route of
+    // the turn being run, not the one that opened the session.
+    const routeChannel = async () => {
+      const r = currentTurn()?.route ?? route;
+      return asChannel(await deps.client.channels.fetch(r.threadId ?? r.channelId));
+    };
 
     const tools: AnyAgentTool[] = [
       {
