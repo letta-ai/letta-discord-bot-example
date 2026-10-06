@@ -78,10 +78,6 @@ export async function startDiscord(
     void dispatch(first.route, items);
   });
 
-  function adminForMessage(m: Message): boolean {
-    return isAdminUser(config, m.author.id, m.member?.roles.cache);
-  }
-
   async function dispatch(route: RouteKey, items: Pending[]) {
     const last = items[items.length - 1]!;
     const renderer = new TurnRenderer({ config, channel: last.channel as never, triggerMessage: last.message as never });
@@ -225,9 +221,6 @@ export async function startDiscord(
   client.on(Events.Error, (err) => log.error("discord client error", { err: String(err) }));
 
   await client.login(config.DISCORD_BOT_TOKEN);
-
-  // Silence unused helper warning; kept for future per-message admin checks.
-  void adminForMessage;
 
   return {
     client,
