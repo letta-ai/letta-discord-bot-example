@@ -1,7 +1,9 @@
 import type { Config } from "../config.ts";
 import { log } from "../log.ts";
 import { isAudioContentType, type TranscribeInput } from "../transcribe/index.ts";
-import type { InboundFile, InboundImage, InboundMessage, RouteKey } from "../types.ts";
+import type { InboundFile, InboundImage, InboundMessage, ReplyTarget, RouteKey } from "../types.ts";
+
+export const REPLY_EXCERPT_MAX = 600;
 
 const VOICE_MESSAGE_FLAG = 1 << 13; // MessageFlags.IsVoiceMessage
 
@@ -28,6 +30,16 @@ export interface IngressMessage {
     ownerId?: string | null;
   };
   reference?: { messageId?: string } | null;
+  /** discord.js Message#fetchReference: the replied-to message. */
+  fetchReference?(): Promise<{
+    id: string;
+    content: string;
+    author: { id: string; bot: boolean; username: string; globalName?: string | null };
+    member?: { displayName?: string } | null;
+    attachments?: { size: number };
+    embeds?: unknown[];
+    components?: unknown[];
+  }>;
   mentions: { users: { has(id: string): boolean }; repliedUser?: { id: string } | null };
   attachments: {
     values(): Iterable<{ name: string; url: string; contentType: string | null; size: number; duration?: number | null }>;
@@ -216,6 +228,7 @@ export async function normalize(
   transcriber?: TranscriberLike,
 ): Promise<InboundMessage> {
   const { images, files } = await collectAttachments(config, msg, fetcher, transcriber);
+  const replyTo = await fetchReplyTarget(msg, botUserId);
   return {
     route,
     messageId: msg.id,
@@ -225,9 +238,41 @@ export async function normalize(
     text: stripMention(msg.content, botUserId),
     createdAt: msg.createdAt.toISOString(),
     ...(msg.reference?.messageId ? { replyToMessageId: msg.reference.messageId } : {}),
+    ...(replyTo ? { replyTo } : {}),
     images,
     files,
   };
+}
+
+/**
+ * Resolve the replied-to message so the envelope carries who said what. Best
+ * effort: on any failure the envelope keeps just the reply_to id.
+ */
+async function fetchReplyTarget(msg: IngressMessage, botUserId: string): Promise<ReplyTarget | undefined> {
+  if (!msg.reference?.messageId || !msg.fetchReference) return undefined;
+  try {
+    const ref = await msg.fetchReference();
+    let text = stripMention(ref.content ?? "", botUserId).replace(/\s+/g, " ").trim();
+    if (text.length > REPLY_EXCERPT_MAX) text = `${text.slice(0, REPLY_EXCERPT_MAX - 3)}...`;
+    if (!text) {
+      const parts = [
+        ref.attachments?.size ? `${ref.attachments.size} attachment(s)` : "",
+        ref.embeds?.length || ref.components?.length ? "embed or card" : "",
+      ].filter(Boolean);
+      text = parts.length ? `[${parts.join(", ")}]` : "";
+    }
+    return {
+      messageId: ref.id,
+      authorId: ref.author.id,
+      authorName: ref.member?.displayName || ref.author.globalName || ref.author.username,
+      authorIsBot: ref.author.bot,
+      own: ref.author.id === botUserId,
+      text,
+    };
+  } catch (err) {
+    log.debug("could not fetch reply target", { err: String(err) });
+    return undefined;
+  }
 }
 
 /** Message-id dedupe with TTL. */

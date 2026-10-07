@@ -73,6 +73,19 @@ export function buildEnvelopeText(batch: InboundMessage[], attachments: Uploaded
         bot: m.authorIsBot ? "true" : undefined,
       })}>${escapeXml(m.text)}</message>`,
     );
+    if (m.replyTo) {
+      const r = m.replyTo;
+      lines.push(
+        `<reply_target ${attrs({
+          for_message: m.messageId,
+          message_id: r.messageId,
+          sender_id: r.authorId,
+          sender_name: r.authorName,
+          bot: r.authorIsBot ? "true" : undefined,
+          own: r.own ? "true" : undefined,
+        })}>${escapeXml(r.text)}</reply_target>`,
+      );
+    }
     for (const img of m.images) {
       lines.push(`<image ${attrs({ message_id: m.messageId, name: img.name, media_type: img.mediaType })}/>`);
     }

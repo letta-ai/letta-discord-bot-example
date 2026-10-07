@@ -27,8 +27,19 @@ export interface InboundMessage {
   text: string; // mention of the bot stripped
   createdAt: string; // ISO
   replyToMessageId?: string;
+  replyTo?: ReplyTarget; // the replied-to message, when it could be fetched
   images: InboundImage[]; // small images, sent as multimodal content
   files: InboundFile[]; // everything else, uploaded into the sandbox
+}
+
+/** The message a Discord reply points at, so the agent need not look it up. */
+export interface ReplyTarget {
+  messageId: string;
+  authorId: string;
+  authorName: string;
+  authorIsBot: boolean;
+  own: boolean; // written by this bot
+  text: string; // excerpt, capped at REPLY_EXCERPT_MAX
 }
 
 export interface InboundImage {
