@@ -100,10 +100,11 @@ cp .env.example .env
 Fill in `DISCORD_BOT_TOKEN`, `LETTA_API_KEY`, and `LETTA_AGENT_ID`. Never commit `.env`.
 
 > [!WARNING]
-> **Security defaults:** `APPROVAL_MODE=allow` and `PERMISSION_MODE=unrestricted` run every tool
-> call without asking. Anyone who can message the bot can direct shell execution. Restrict who can
-> reach the bot and configure a stricter permission and approval policy before exposing it to
-> untrusted users.
+> **Tool approvals:** by default (`PERMISSION_MODE=standard`, `APPROVAL_MODE=admins`) the agent
+> can read files and run read-only commands, and anything else, such as editing files or running
+> other shell commands, needs an admin to click Approve. Set `DISCORD_ADMIN_USER_IDS` to your
+> Discord user id, or every such call is denied. Only loosen this (`APPROVAL_MODE=allow`,
+> `PERMISSION_MODE=unrestricted`) if you trust everyone who can message the bot.
 
 > [!IMPORTANT]
 > **Managed sandboxes and API keys:** with `LETTA_COMPUTER` unset, tools run in an SDK-managed
@@ -152,12 +153,12 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `LETTA_BASE_URL` | unset | Letta API base URL, for self hosted Letta. |
 | `LETTA_COMPUTER` | unset | Connected computer for tool execution. Unset means an SDK-managed Cloud sandbox per conversation. |
 | `SANDBOX_TTL_MINUTES` | `30` | Idle lifetime of each managed conversation sandbox, clamped to 1-60 minutes. |
-| `PERMISSION_MODE` | `unrestricted` | `strict`, `standard`, `acceptEdits` or `unrestricted` (bypass permission checks). |
+| `PERMISSION_MODE` | `standard` | `strict`, `standard`, `acceptEdits` or `unrestricted` (bypass permission checks). |
 | `ALLOWED_TOOLS` | empty (CSV) | Tool allowlist. Empty uses the harness default toolset. |
 | `TOOLSET_BASE` | unset | `auto`, `default`, `codex`, `gemini` or `none`. |
 | `CONVERSATION_MODEL` | unset | Model pinned when a conversation is created. |
 | `ROUTES_FILE` | unset | JSON routing table that pins Discord surfaces to existing conversations, see Routing table. |
-| `APPROVAL_MODE` | `allow` | `deny`, `admins`, `requester` or `allow`. |
+| `APPROVAL_MODE` | `admins` | `deny`, `admins`, `requester` or `allow`. |
 | `APPROVAL_TIMEOUT_SECONDS` | `300` | How long an approval stays clickable, then deny. |
 | `TURN_TIMEOUT_SECONDS` | `900` | Longest a whole turn may run, approval waits included. Must exceed `APPROVAL_TIMEOUT_SECONDS`. The SDK's own default is 2 minutes. |
 | `ENABLE_DISCORD_TOOLS` | `true` | Expose the listener-owned Discord tools to the agent. Does not remove `discord_send_message` in tool-mode open channels. |
@@ -271,21 +272,23 @@ to `LETTA_AGENT_ID`. The listener refuses to start with an invalid table. Combin
 
 ## ✅ Approvals
 
-`APPROVAL_MODE` decides who signs off on a tool call. A routing-table `policy` can set a different
+`PERMISSION_MODE` decides which tool calls need sign-off. The default, `standard`, runs read-only
+calls on its own (file reads and searches in the working directory, read-only shell commands) and
+asks about everything else. `unrestricted` never asks. `APPROVAL_MODE` decides who signs off. A routing-table `policy` can set a different
 `approvalMode` per surface, see [Tools and permissions](docs/tools-and-permissions.md). A request shows the tool name and a compact
 preview of its input, plus Approve and Deny buttons.
 
 | Value | Behavior |
 |---|---|
 | `deny` | Everything is auto-denied with a reason. Useful for a read-only agent. |
-| `admins` | Buttons, only ids in `DISCORD_ADMIN_USER_IDS` or `DISCORD_ADMIN_ROLE_IDS` may click. |
+| `admins` | Buttons, only ids in `DISCORD_ADMIN_USER_IDS` or `DISCORD_ADMIN_ROLE_IDS` may click. This is the default. |
 | `requester` | Buttons, the user who triggered the turn or an admin may click. |
-| `allow` | Everything is auto-allowed. This is the default. |
+| `allow` | Everything is auto-allowed. |
 
 Anything not decided within `APPROVAL_TIMEOUT_SECONDS` is denied.
 
 `admins` needs at least one id in `DISCORD_ADMIN_USER_IDS` or `DISCORD_ADMIN_ROLE_IDS`. With
-neither set nobody can click, so every request times out.
+neither set, requests are denied right away instead of posting buttons nobody can click.
 `bun run doctor` and the startup log both warn about this.
 
 ## 🔧 Discord tools
@@ -379,11 +382,11 @@ explains why Modal is a poor fit.
   because all Discord access goes through the listener-owned tools.
 - Everything from Discord reaches the agent wrapped in a `channel-notification` envelope with a
   preamble marking it as untrusted user content, not operator instructions.
-- The defaults (`APPROVAL_MODE=allow`, `PERMISSION_MODE=unrestricted`) run every tool call without
-  asking, on the sandbox or `LETTA_COMPUTER`. That hands shell execution to anyone who can message
-  the bot. Unless you trust everyone who can reach it, remove the tools they should not have
-  (`ALLOWED_TOOLS`, or a per-surface routing-table `policy`) and set `APPROVAL_MODE` to `admins` or
-  `requester`. See [Tools and permissions](docs/tools-and-permissions.md).
+- By default only admins can approve tool calls beyond read-only ones. `APPROVAL_MODE=allow` with
+  `PERMISSION_MODE=unrestricted` runs every call without asking, on the sandbox or
+  `LETTA_COMPUTER`, which hands shell execution to anyone who can message the bot. Even with
+  approvals on, remove tools that untrusted users should never reach (`ALLOWED_TOOLS`, or a
+  per-surface routing-table `policy`). See [Tools and permissions](docs/tools-and-permissions.md).
 - Prefer `DM_POLICY=allowlist` or `off`, and set `DISCORD_ALLOWED_USER_IDS` explicitly. The same
   list also restricts who the bot answers in servers, so include everyone who should be able to
   use it there.

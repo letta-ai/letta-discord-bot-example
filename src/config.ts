@@ -45,12 +45,12 @@ export const ConfigSchema = z.object({
 
   // Agent policy (operator-owned, never changeable from Discord)
   // Defaults for every route. A routing table entry can override them per route (see src/routing.ts).
-  PERMISSION_MODE: PermissionModeSchema.default("unrestricted"),
+  PERMISSION_MODE: PermissionModeSchema.default("standard"),
   ALLOWED_TOOLS: csv, // empty = harness default toolset
   TOOLSET_BASE: ToolsetBaseSchema.optional(),
   CONVERSATION_MODEL: z.string().optional(), // pinned at conversation create
   ROUTES_FILE: z.string().optional(), // JSON routing table pinning Discord surfaces to existing conversations
-  APPROVAL_MODE: ApprovalModeSchema.default("allow"),
+  APPROVAL_MODE: ApprovalModeSchema.default("admins"),
   APPROVAL_TIMEOUT_SECONDS: int(300),
   TURN_TIMEOUT_SECONDS: int(900), // whole turn, including approval waits
   ENABLE_DISCORD_TOOLS: bool(true),
