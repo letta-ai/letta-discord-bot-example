@@ -273,9 +273,9 @@ describe("TurnRenderer", () => {
 
     expect(channel.sent.map((m) => m.content)).toEqual([
       "Let me look.",
-      "[card] -# ✓ Search memory · 0.4s\n-# ✓ Read notes.md · 1.2s", // consecutive calls share a card
+      "[card] ✓ Search memory · 0.4s\n✓ Read notes.md · 1.2s", // consecutive calls share a card
       "Found it.",
-      "[card] -# ✓ bun test · 0.4s\n-# ↻ Retrying (attempt 2/3)",
+      "[card] ✓ bun test · 0.4s\n↻ Retrying (attempt 2/3)",
       "Done.",
     ]);
     expect(channel.sent[1]!.card!.accent).toBe(0x57f287);
@@ -290,13 +290,13 @@ describe("TurnRenderer", () => {
 
     renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "bun test" });
     await new Promise((r) => setTimeout(r, 10));
-    expect(channel.sent[0]!.card).toEqual({ accent: 0x80848e, text: "-# ◌ bun test" });
+    expect(channel.sent[0]!.card).toEqual({ accent: 0x80848e, text: "◌ bun test" });
 
     t = 2500;
     renderer.onEvent({ kind: "tool_result", toolCallId: "1", isError: true });
     renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
     await renderer.finished;
-    expect(channel.sent[0]!.card).toEqual({ accent: 0xed4245, text: "-# ✗ bun test · 2.5s" });
+    expect(channel.sent[0]!.card).toEqual({ accent: 0xed4245, text: "✗ bun test · 2.5s" });
   });
 
   test("calls without a result are marked stopped when the turn ends", async () => {
@@ -307,7 +307,7 @@ describe("TurnRenderer", () => {
     renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "sleep 600" });
     renderer.onEvent({ kind: "done", success: false, errorCode: "interrupted", durationMs: 1 });
     await renderer.finished;
-    expect(channel.sent[0]!.card!.text).toBe("-# ■ sleep 600");
+    expect(channel.sent[0]!.card!.text).toBe("■ sleep 600");
   });
 
   test("repeated tool_call chunks update one line instead of appending", async () => {
@@ -330,7 +330,7 @@ describe("TurnRenderer", () => {
     await renderer.finished;
 
     expect(channel.sent).toHaveLength(1);
-    expect(channel.sent[0]!.card!.text).toBe("-# ✓ Commit memory note · 0.4s\n-# ✓ Read recent channel messages · 0.5s");
+    expect(channel.sent[0]!.card!.text).toBe("✓ Commit memory note · 0.4s\n✓ Read recent channel messages · 0.5s");
   });
 
   test("falls back to plain subtext lines if Discord rejects the card", async () => {
@@ -373,7 +373,7 @@ describe("TurnRenderer", () => {
 
     renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "Check system info" });
     await new Promise((r) => setTimeout(r, 20));
-    expect(channel.sent.map((m) => m.content)).toContain("[card] -# ◌ Check system info");
+    expect(channel.sent.map((m) => m.content)).toContain("[card] ◌ Check system info");
 
     renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
     await renderer.finished;

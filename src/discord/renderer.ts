@@ -493,8 +493,7 @@ function toolCard(block: ToolBlock): CardPayload {
       {
         type: CONTAINER,
         accent_color: accent,
-        // Subtext keeps the card quiet next to the reply text.
-        components: [{ type: TEXT_DISPLAY, content: entries.map((e) => `-# ${toolLine(e)}`).join("\n") }],
+        components: [{ type: TEXT_DISPLAY, content: entries.map(toolLine).join("\n") }],
       },
     ],
     allowedMentions: NO_MENTIONS,
