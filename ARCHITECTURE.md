@@ -68,6 +68,12 @@ Letta
 - Stream mapping: `assistant` -> assistant_delta (fragments, append), `reasoning` -> reasoning_delta,
   `tool_call` -> tool_call (summary = short human description, e.g. Bash command first 80 chars),
   `tool_result`, `retry`, `result` -> done, `error` -> error. Stream must end on `result`; bound waits.
+- One reader per session (`pump` in `bridge.ts`) owns `session.stream()` for the session's lifetime and hands
+  each message to the running turn, or to the background poster between turns. A turn renders only runs it
+  started (`RunTracker`: our `otid` echo, then `loop_status`). Runs the agent starts itself (task notifications,
+  echoed with a non-`discord-` otid) post on relay routes through `bridge.onBackground` as plain channel
+  messages, mid-turn or between turns. Tool routes post nothing on their own; the agent uses
+  `discord_send_message`. Background subagent runs are never posted.
 - Session errors (socket closed, sandbox expired): close + evict the pooled session, retry the turn once.
 
 Envelope (untrusted data, mirrors Channels so existing agent skills keep working)

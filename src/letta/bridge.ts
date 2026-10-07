@@ -13,6 +13,7 @@ import {
   routeKeyString,
   type AgentBridge,
   type InboundMessage,
+  type BackgroundSink,
   type RouteKey,
   type RouteStatus,
   type SandboxFiles,
@@ -21,7 +22,14 @@ import {
   type TurnEvent,
 } from "../types.ts";
 import { buildSendMessage, type UploadedAttachment } from "./envelope.ts";
-import { RunTracker } from "./run-tracker.ts";
+import { BackgroundRuns, OTID_PREFIX, RunTracker } from "./run-tracker.ts";
+
+/** A user-message echo for an input that is not this turn's message. */
+function isForeignEcho(msg: SDKMessage, otid: string): boolean {
+  if (msg.type !== "stream_event") return false;
+  const ev = ((msg as unknown as { event?: Record<string, unknown> }).event ?? {}) as Record<string, unknown>;
+  return ev.message_type === "user_message" && typeof ev.run_id === "string" && ev.otid !== otid;
+}
 import { RouteStore } from "./store.ts";
 
 /** Minimal client surface used by the bridge (lets tests inject a fake). */
@@ -72,6 +80,18 @@ interface LaneState {
   aborted: boolean;
   /** The session's runtime reports run ids and loop status, so turns track runs strictly. */
   tracksRuns: boolean;
+  /** The running turn's reader; the session pump hands it every message while set. */
+  sink: TurnSink | null;
+  /** Classifies output outside Discord turns; one per session. */
+  bgRuns: BackgroundRuns | null;
+  /** Open background burst, if the agent is speaking on its own. */
+  bg: { emit: (e: TurnEvent) => void; started: number } | null;
+}
+
+interface TurnSink {
+  onMessage(msg: SDKMessage): void;
+  /** The session's stream ended: closed (no error) or failed. */
+  onClose(err?: unknown): void;
 }
 
 /**
@@ -160,6 +180,9 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         idleTimer: null,
         aborted: false,
         tracksRuns: false,
+        sink: null,
+        bgRuns: null,
+        bg: null,
       };
       lanes.set(key, s);
     }
@@ -185,6 +208,8 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     s.idleTimer = null;
     s.sessionMode = null;
     s.tracksRuns = false;
+    s.bgRuns = null;
+    endBackground(s);
     if (s.session) {
       log.debug("closing session", { route: s.key, reason });
       try {
@@ -246,6 +271,71 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     };
   }
 
+  /**
+   * The single reader of a session's stream, for the session's lifetime. The
+   * SDK ends each stream() at a result, so read on until the session closes.
+   * A running turn gets every message; otherwise it is the agent speaking on
+   * its own (a task-notification run) and goes to the background poster.
+   */
+  async function pump(s: LaneState, session: LettaCodeSession) {
+    let failure: unknown;
+    try {
+      for (;;) {
+        let sawResult = false;
+        for await (const msg of session.stream()) {
+          if (msg.type === "result") sawResult = true;
+          if (s.sink) s.sink.onMessage(msg);
+          else background(s, msg);
+        }
+        // stream() only returns without a result once the session is closed.
+        if (!sawResult || s.session !== session) break;
+      }
+    } catch (err) {
+      failure = err;
+      log.debug("session stream failed", { route: s.key, err: String(err) });
+    }
+    const sink = s.sink;
+    s.sink = null;
+    sink?.onClose(failure);
+    if (s.session === session) closeSession(s, failure ? "stream failed" : "stream ended");
+  }
+
+  let backgroundSink: BackgroundSink | null = null;
+
+  /** Render output from runs the agent started itself, in relay-mode lanes. */
+  function background(s: LaneState, msg: SDKMessage) {
+    if (!s.bgRuns) return;
+    const verdict = s.bgRuns.see(msg);
+    if (verdict === "ignore") return;
+    if (verdict === "end") {
+      endBackground(s);
+      return;
+    }
+    if (s.sessionMode !== "relay" || !backgroundSink) return;
+    if (!s.bg) {
+      log.info("posting agent-initiated output", { route: s.key });
+      s.bg = { emit: backgroundSink(s.route), started: Date.now() };
+    }
+    const emit = s.bg.emit;
+    mapMessage(msg, (e) => {
+      try {
+        emit(e);
+      } catch (err) {
+        log.warn("background onEvent threw", { err: String(err) });
+      }
+    }, { v: false });
+  }
+
+  function endBackground(s: LaneState) {
+    const bg = s.bg;
+    if (!bg) return;
+    s.bg = null;
+    try {
+      bg.emit({ kind: "done", success: true, durationMs: Date.now() - bg.started });
+    } catch {}
+    if (!s.busy) armIdle(s);
+  }
+
   async function ensureSession(s: LaneState, route: RouteKey, mode: ReplyMode): Promise<LettaCodeSession> {
     // A pinned lane can serve routes with different reply modes, and the tool
     // set is fixed per session, so switch sessions when the mode changes.
@@ -291,6 +381,8 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     s.model = info.model;
     s.session = session;
     s.sessionMode = mode;
+    s.bgRuns = new BackgroundRuns();
+    void pump(s, session);
     log.info("session ready", { route: s.key, conversationId, model: info.model, sandbox: !!sandboxRef, mode });
     return session;
   }
@@ -428,51 +520,72 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         if (interruptedDuringSetup()) return;
         // Tag our message so its runs can be told apart from task-notification
         // turns and background subagents streaming into the same conversation.
-        const tracker = new RunTracker(`discord-${randomUUID()}`, s.tracksRuns);
+        const tracker = new RunTracker(`${OTID_PREFIX}${randomUUID()}`, s.tracksRuns);
+        // Runs the agent was already running on its own stay with the background poster.
+        if (s.bgRuns) tracker.markForeign(s.bgRuns.ownRuns());
         const started = Date.now();
-        await session.send(buildSendMessage(batch, attachments, mode), { otid: tracker.otid });
-        let terminal = false;
         // Once a foreign result has taken the SDK's turn, the SDK's own
         // timeout no longer covers ours, so bound the wait here.
         let deadline: ReturnType<typeof setTimeout> | null = null;
         let timedOut = false;
-        reading: for (;;) {
-          // The SDK ends each stream() at a result; after skipping a foreign
-          // result, read on for our own run.
-          let skipped = false;
-          for await (const msg of session.stream()) {
-            const verdict = tracker.see(msg);
-            // Output held until its run was identified goes out first, in order.
-            for (const held of tracker.release()) mapMessage(held, emit, acted);
-            if (verdict === "drop" || verdict === "hold") continue;
-            if (verdict === "skip-result") {
-              log.info("ignored result from another run", { route: s.key, runIds: (msg as { runIds?: string[] }).runIds });
-              skipped = true;
-              deadline ??= setTimeout(() => {
-                timedOut = true;
-                // Abort alone may emit nothing when the SDK has no turn open;
-                // closing resolves the pending read so the lane is freed.
-                session.abort().catch(() => {}).finally(() => closeSession(s, "turn timeout"));
-              }, config.TURN_TIMEOUT_SECONDS * 1000);
-              continue;
-            }
-            if (verdict === "end") {
-              emit({ kind: "done", success: true, durationMs: Date.now() - started });
-              terminal = true;
-              break reading;
-            }
-            if (mapMessage(msg, emit, acted)) {
-              terminal = true;
-              break reading;
-            }
-          }
-          if (!skipped || s.aborted || timedOut) break;
+        const outcome = new Promise<boolean>((resolve, reject) => {
+          const finish = (terminal: boolean) => {
+            if (deadline) clearTimeout(deadline);
+            if (s.sink === sink) s.sink = null;
+            resolve(terminal);
+          };
+          const sink: TurnSink = {
+            onMessage(msg) {
+              const verdict = tracker.see(msg);
+              // Output held until its run was identified goes out first, in order.
+              for (const held of tracker.release()) mapMessage(held, emit, acted);
+              for (const f of tracker.releaseForeign()) background(s, f);
+              if (isForeignEcho(msg, tracker.otid)) background(s, msg);
+              switch (verdict) {
+                case "drop":
+                case "hold":
+                  return;
+                case "foreign":
+                  background(s, msg);
+                  return;
+                case "skip-result":
+                  log.info("result from another run", { route: s.key, runIds: (msg as { runIds?: string[] }).runIds });
+                  background(s, msg);
+                  deadline ??= setTimeout(() => {
+                    timedOut = true;
+                    // Abort alone may emit nothing when the SDK has no turn open;
+                    // closing ends the stream so the lane is freed.
+                    session.abort().catch(() => {}).finally(() => closeSession(s, "turn timeout"));
+                  }, config.TURN_TIMEOUT_SECONDS * 1000);
+                  return;
+                case "end":
+                  emit({ kind: "done", success: true, durationMs: Date.now() - started });
+                  finish(true);
+                  return;
+                default:
+                  if (msg.type === "result" && s.aborted) {
+                    emit({ kind: "done", success: false, errorCode: "interrupted", durationMs: 0 });
+                    finish(true);
+                  } else if (mapMessage(msg, emit, acted)) finish(true);
+              }
+            },
+            onClose(err) {
+              if (deadline) clearTimeout(deadline);
+              if (err) reject(err);
+              else resolve(false);
+            },
+          };
+          s.sink = sink;
+        });
+        try {
+          await session.send(buildSendMessage(batch, attachments, mode), { otid: tracker.otid });
+        } catch (err) {
+          s.sink = null;
+          throw err;
         }
-        if (deadline) clearTimeout(deadline);
+        const terminal = await outcome;
         if (tracker.tracksRuns && s.session === session) s.tracksRuns = true;
-        if (tracker.foreign.size || tracker.unclaimed().length) {
-          log.debug("dropped foreign runs", { route: s.key, runs: [...tracker.foreign, ...tracker.unclaimed()] });
-        }
+        if (tracker.unclaimed().length) log.debug("dropped unclaimed runs", { route: s.key, runs: tracker.unclaimed() });
         if (!terminal && timedOut) {
           emit({ kind: "error", message: "The agent did not finish this turn in time." });
           emit({ kind: "done", success: false, errorCode: "timeout", durationMs: Date.now() - started });
@@ -610,6 +723,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
             }
           : {}),
       };
+    },
+
+    onBackground(sink) {
+      backgroundSink = sink;
     },
 
     async shutdown() {

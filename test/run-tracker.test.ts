@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage } from "@letta-ai/letta-agent-sdk";
-import { RunTracker, type RunVerdict } from "../src/letta/run-tracker.ts";
+import { BackgroundRuns, RunTracker, type RunVerdict } from "../src/letta/run-tracker.ts";
 
 // Sequences reduced from live captures on 2026-10-07 (conv-97211ad9, conv-c0f0…).
 const echo = (otid: string, run?: string) =>
@@ -45,7 +45,7 @@ describe("RunTracker", () => {
         say("b", "B"),
         status("WAITING_ON_INPUT"),
       ]),
-    ).toEqual(["pass", "pass", "pass", "drop", "skip-result", "pass", "pass", "pass", "pass", "end"]);
+    ).toEqual(["pass", "pass", "pass", "foreign", "skip-result", "pass", "pass", "pass", "pass", "end"]);
   });
 
   test("a foreign run that starts during our turn is reclassified by its echo", () => {
@@ -54,7 +54,7 @@ describe("RunTracker", () => {
     expect(t.ours.has("n")).toBe(true);
     t.see(echo("note", "n"));
     expect(t.ours.has("n")).toBe(false);
-    expect(t.see(say("n"))).toBe("drop");
+    expect(t.see(say("n"))).toBe("foreign");
   });
 
   test("stale output buffered before our echo is dropped", () => {
@@ -107,11 +107,33 @@ describe("RunTracker", () => {
     expect(t.unclaimed()).toEqual(["sub"]);
   });
 
-  test("held output for a run later echoed as foreign is discarded", () => {
+  test("held output for a run later echoed as the agent's own goes to releaseForeign", () => {
     const t = new RunTracker("me", true);
     run(t, [echo("me", "a"), say("n", "note text")]);
     t.see(echo("note", "n"));
     expect(t.release()).toEqual([]);
+    expect(t.releaseForeign().map((m) => (m as { content: string }).content)).toEqual(["note text"]);
     expect(t.unclaimed()).toEqual([]);
   });
 });
+
+describe("BackgroundRuns", () => {
+  test("posts runs started by the agent's own inputs, not Discord turns or subagents", () => {
+    const b = new BackgroundRuns();
+    expect(b.see(echo("task-note", "n"))).toBe("ignore");
+    expect(b.see(say("n", "slept"))).toBe("post");
+    expect(b.see(say("sub", "**Direct answer.**"))).toBe("ignore");
+    expect(b.see(echo("discord-x", "d"))).toBe("ignore");
+    expect(b.see(say("d", "turn text"))).toBe("ignore");
+    expect(b.see(status("WAITING_ON_INPUT"))).toBe("end");
+  });
+
+  test("continuation runs listed in loop_status are posted", () => {
+    const b = new BackgroundRuns();
+    b.see(echo("task-note", "n"));
+    b.see(status("PROCESSING_API_RESPONSE", ["n2"]));
+    expect(b.see(say("n2", "more"))).toBe("post");
+    expect(b.see(result(["n", "n2"]))).toBe("end");
+  });
+});
+

@@ -57,6 +57,7 @@ function recordingBridge(submitted: string[][]): AgentBridge {
     async status() {
       return { busy: false, queued: 0, hasConversation: false };
     },
+    onBackground() {},
     async shutdown() {},
   };
 }

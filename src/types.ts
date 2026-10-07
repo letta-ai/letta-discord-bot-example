@@ -140,8 +140,17 @@ export interface AgentBridge {
   reset(route: RouteKey): Promise<"reset" | "pinned">;
   /** Safe, user-visible status (no ids unless admin=true). */
   status(route: RouteKey, admin: boolean): Promise<RouteStatus>;
+  /**
+   * Where to render what the agent says outside a Discord turn (runs started
+   * by its own task notifications). Relay-mode routes only; called once per
+   * burst of output, which ends with a `done` event.
+   */
+  onBackground(sink: BackgroundSink): void;
   shutdown(): Promise<void>;
 }
+
+/** Opens a renderer for one burst of agent-initiated output on a route. */
+export type BackgroundSink = (route: RouteKey) => (event: TurnEvent) => void;
 
 export interface RouteStatus {
   busy: boolean;

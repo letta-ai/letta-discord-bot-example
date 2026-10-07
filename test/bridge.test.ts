@@ -7,13 +7,14 @@ import { clientOptions, createAgentBridge, type LettaClientLike } from "../src/l
 import { RouteStore } from "../src/letta/store.ts";
 import type { InboundMessage, RouteKey, TurnContext, TurnEvent } from "../src/types.ts";
 
-const config = loadConfig({
+const rawConfig = {
   DISCORD_BOT_TOKEN: "x",
   LETTA_API_KEY: "y",
   LETTA_AGENT_ID: "agent-123",
   SESSION_IDLE_MINUTES: "0",
   APPROVAL_MODE: "admins",
-});
+};
+const config = loadConfig(rawConfig);
 
 const route: RouteKey = { guildId: "g", channelId: "c", threadId: "t" };
 
@@ -47,8 +48,23 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
       calls.resumes++;
       calls.resumedIds.push(_id);
       calls.canUseTool = options?.canUseTool;
-      let queue: SDKMessage[] = [];
-      let release: (() => void) | null = null;
+      // Like the SDK: one queue for the session's lifetime; stream() ends at
+      // each result and returns without one only once the session is closed.
+      const queue: (SDKMessage | null)[] = [];
+      let waiter: ((m: SDKMessage | null) => void) | null = null;
+      let closed = false;
+      const push = (m: SDKMessage | null) => {
+        if (waiter) {
+          const w = waiter;
+          waiter = null;
+          w(m);
+        } else queue.push(m);
+      };
+      const next = (): Promise<SDKMessage | null> => {
+        if (queue.length) return Promise.resolve(queue.shift()!);
+        if (closed) return Promise.resolve(null);
+        return new Promise((r) => (waiter = r));
+      };
       const session = {
         sandbox: opts.noSandbox ? undefined : {
           async uploadFiles(files: { name: string }[]) {
@@ -71,25 +87,31 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
           calls.sends.push(m);
           const r = script(m, calls.sends.length, o?.otid);
           if (r instanceof Error) throw r;
-          queue = r;
+          for (const msg of r) push(msg);
         },
         async *stream() {
-          while (queue.length) {
-            const next = queue.shift()!;
+          for (;;) {
+            const msg = await next();
+            if (!msg) return;
             // simulate the stream dying mid-turn
-            if ((next as { type: string }).type === "throw") throw new Error("stream died");
-            yield next;
-            if (next.type === "result") return;
+            if ((msg as { type: string }).type === "throw") throw new Error("stream died");
+            yield msg;
+            if (msg.type === "result") return;
           }
-          // simulate an abort that ends the stream without a result
-          await new Promise<void>((res) => (release = res));
         },
         async abort() {
           calls.aborts++;
-          release?.();
+          // The runtime reports the cancelled turn as a failed result.
+          push({ type: "result", success: false, errorCode: "cancelled", durationMs: 0 } as unknown as SDKMessage);
+        },
+        /** Test hook: the agent's runtime emits something outside any turn. */
+        emit(msgs: SDKMessage[]) {
+          for (const msg of msgs) push(msg);
         },
         close() {
           calls.closes++;
+          closed = true;
+          push(null);
         },
       };
       return session as never;
@@ -597,4 +619,88 @@ describe("run tracking", () => {
     await bridge.submit([inbound("m1", "?")], a.ctx);
     expect(texts(a.events)).toEqual(["Searching.", "Done."]);
   });
+
+  test("relay: what the agent says between turns is posted to the background sink", async () => {
+    const store = new RouteStore(":memory:");
+    const sessions: any[] = [];
+    const { client } = fakeClient((_m, _n, otid) => [echo(otid, "a"), say("a", "Sleep is running."), result(["a"])]);
+    const resume = client.resumeSession.bind(client);
+    client.resumeSession = (id, o) => {
+      const sess = resume(id, o);
+      sessions.push(sess);
+      return sess;
+    };
+    const bridge = createAgentBridge(config, { client, store });
+    const bg: { route: RouteKey; events: TurnEvent[] }[] = [];
+    bridge.onBackground((r) => {
+      const burst = { route: r, events: [] as TurnEvent[] };
+      bg.push(burst);
+      return (e) => burst.events.push(e);
+    });
+    const a = ctxCollector("m1");
+    await bridge.submit([inbound("m1", "sleep then tell me")], a.ctx);
+    expect(texts(a.events)).toEqual(["Sleep is running."]);
+    // The task finishes: Letta Code starts a run from its notification.
+    sessions[0].emit([
+      echo("note-bash", "n"),
+      status("PROCESSING_API_RESPONSE", ["n"]),
+      say("n", "slept"),
+      say("subagent-run", "**Direct answer.**"),
+      status("WAITING_ON_INPUT"),
+    ]);
+    await Bun.sleep(5);
+    expect(bg).toHaveLength(1);
+    expect(bg[0]!.route).toEqual(route);
+    expect(texts(bg[0]!.events)).toEqual(["slept"]);
+    expect(bg[0]!.events.at(-1)).toMatchObject({ kind: "done", success: true });
+  });
+
+  test("relay: a notification run overlapping our turn is posted separately", async () => {
+    const store = new RouteStore(":memory:");
+    const { client } = fakeClient((_m, _n, otid) => [
+      echo("note-1", "tn"),
+      status("PROCESSING_API_RESPONSE", ["tn"]),
+      say("tn", "The search finished."),
+      result(["tn"]),
+      echo(otid, "b"),
+      status("PROCESSING_API_RESPONSE", ["b"]),
+      say("b", "Yes."),
+      status("WAITING_ON_INPUT"),
+    ]);
+    const bridge = createAgentBridge(config, { client, store });
+    const bg: TurnEvent[][] = [];
+    bridge.onBackground(() => {
+      const events: TurnEvent[] = [];
+      bg.push(events);
+      return (e) => events.push(e);
+    });
+    const a = ctxCollector("m1");
+    await bridge.submit([inbound("m1", "?")], a.ctx);
+    expect(texts(a.events)).toEqual(["Yes."]);
+    expect(bg.map(texts)).toEqual([["The search finished."]]);
+  });
+
+  test("tool mode: the bot does not post what the agent says on its own", async () => {
+    const store = new RouteStore(":memory:");
+    const toolConfig = loadConfig({ ...rawConfig, OPEN_CHANNEL_REPLY_MODE: "tool", DISCORD_OPEN_CHANNEL_IDS: "c" });
+    const sessions: any[] = [];
+    const { client } = fakeClient((_m, _n, otid) => [echo(otid, "a"), result(["a"])]);
+    const resume = client.resumeSession.bind(client);
+    client.resumeSession = (id, o) => {
+      const sess = resume(id, o);
+      sessions.push(sess);
+      return sess;
+    };
+    const bridge = createAgentBridge(toolConfig, { client, store });
+    let bursts = 0;
+    bridge.onBackground(() => {
+      bursts++;
+      return () => {};
+    });
+    await bridge.submit([inbound("m1", "hi")], ctxCollector("m1").ctx);
+    sessions[0].emit([echo("note", "n"), say("n", "slept"), status("WAITING_ON_INPUT")]);
+    await Bun.sleep(5);
+    expect(bursts).toBe(0);
+  });
 });
+

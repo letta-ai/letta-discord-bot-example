@@ -17,6 +17,7 @@ function fakeBridge(overrides: Partial<AgentBridge> = {}): AgentBridge {
     async status() {
       return { busy: false, queued: 0, hasConversation: false };
     },
+    onBackground() {},
     async shutdown() {},
     ...overrides,
   };

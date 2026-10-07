@@ -11,7 +11,14 @@ import {
 import { replyModeFor, type Config } from "../config.ts";
 import type { RouteStore } from "../letta/store.ts";
 import { log } from "../log.ts";
-import { routeKeyString, type AgentBridge, type InboundMessage, type RouteKey, type TurnContext } from "../types.ts";
+import {
+  routeKeyString,
+  type AgentBridge,
+  type InboundMessage,
+  type RouteKey,
+  type TurnContext,
+  type TurnEvent,
+} from "../types.ts";
 import { ApprovalManager } from "./approvals.ts";
 import { handleCommand, registerSlashCommands } from "./commands.ts";
 import { createTranscriber, type Transcriber } from "../transcribe/index.ts";
@@ -30,6 +37,13 @@ export function transcriberFromConfig(config: Config): Transcriber | undefined {
   });
 }
 import { TurnRenderer } from "./renderer.ts";
+
+/** Stand-in trigger for posts that answer no message: nothing to reply to or react on. */
+const NO_TRIGGER = {
+  edit: async () => {},
+  delete: async () => {},
+  react: async () => {},
+} as never;
 
 export interface DiscordRuntime {
   client: Client;
@@ -77,6 +91,38 @@ export async function startDiscord(
     if (!first) return;
     void dispatch(first.route, items);
   });
+
+  /**
+   * Agent-initiated output (a task-notification run) has no Discord message to
+   * answer, so it posts plainly into the route's thread or channel.
+   */
+  function backgroundRenderer(route: RouteKey): (e: TurnEvent) => void {
+    const pending: TurnEvent[] = [];
+    let renderer: TurnRenderer | null = null;
+    let failed = false;
+    client.channels
+      .fetch(route.threadId ?? route.channelId)
+      .then((channel) => {
+        if (!channel?.isTextBased() || !("send" in channel)) throw new Error("not a text channel");
+        renderer = new TurnRenderer({
+          config,
+          channel: channel as never,
+          triggerMessage: NO_TRIGGER,
+          replyMode: replyModeFor(config, route),
+        });
+        for (const e of pending.splice(0)) renderer.onEvent(e);
+      })
+      .catch((err) => {
+        failed = true;
+        log.warn("background post: channel unavailable", { route: routeKeyString(route), err: String(err) });
+      });
+    return (e) => {
+      if (failed) return;
+      if (renderer) renderer.onEvent(e);
+      else pending.push(e);
+    };
+  }
+  bridge.onBackground(backgroundRenderer);
 
   async function dispatch(route: RouteKey, items: Pending[]) {
     const last = items[items.length - 1]!;
