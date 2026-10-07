@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseRoutingTable, pinnedConversations, resolveRoute } from "../src/routing.ts";
+import { parseRoutingTable, pinnedConversations, policyFor, resolveRoute } from "../src/routing.ts";
 import type { RouteKey } from "../src/types.ts";
 
 const table = parseRoutingTable(
@@ -69,5 +69,48 @@ describe("parseRoutingTable", () => {
         ],
       }),
     ).toThrow(/duplicate channel 1/);
+  });
+});
+
+describe("policyFor", () => {
+  const env = { ALLOWED_TOOLS: [] as string[], TOOLSET_BASE: undefined, PERMISSION_MODE: "unrestricted" as const, APPROVAL_MODE: "allow" as const };
+  const t = parseRoutingTable(
+    JSON.stringify({
+      policy: { permissionMode: "standard" },
+      routes: [
+        { guild: "9", policy: { toolset: "none", allowedTools: ["Read"] } },
+        { channel: "1", conversation: "conv-channel", policy: { approvalMode: "requester" } },
+        { thread: "12", policy: { allowedTools: [] } },
+        { dm: "7", policy: { approvalMode: "admins", permissionMode: "strict" } },
+      ],
+    }),
+  );
+
+  test("no table means the env settings", () => {
+    expect(policyFor(env, null, g("1"))).toEqual({ allowedTools: [], permissionMode: "unrestricted", approvalMode: "allow" });
+  });
+
+  test("each field comes from the most specific entry that sets it, then the table policy, then env", () => {
+    expect(policyFor(env, t, g("1"))).toEqual({ allowedTools: ["Read"], toolset: "none", permissionMode: "standard", approvalMode: "requester" });
+    // The thread resets the allowlist but keeps the guild toolset and the channel approval mode.
+    expect(policyFor(env, t, g("1", "12"))).toEqual({ allowedTools: [], toolset: "none", permissionMode: "standard", approvalMode: "requester" });
+    expect(policyFor(env, t, g("5", null, "8"))).toEqual({ allowedTools: [], permissionMode: "standard", approvalMode: "allow" });
+    expect(policyFor(env, t, { guildId: null, channelId: "d", threadId: null, userId: "7" })).toEqual({
+      allowedTools: [],
+      permissionMode: "strict",
+      approvalMode: "admins",
+    });
+  });
+
+  test("a policy-only entry leaves the conversation to less specific rules", () => {
+    expect(resolveRoute(t, g("1", "12"))).toEqual({ kind: "pinned", conversationId: "conv-channel", rule: "channel:1" });
+    expect(resolveRoute(t, g("3"))).toEqual({ kind: "auto" });
+    expect(pinnedConversations(t)).toEqual(["conv-channel"]);
+  });
+
+  test("rejects an empty entry and unknown policy keys", () => {
+    expect(() => parseRoutingTable(JSON.stringify({ routes: [{ channel: "1" }] }))).toThrow(/needs a conversation, a policy, or both/);
+    expect(() => parseRoutingTable(JSON.stringify({ routes: [{ channel: "1", policy: { deniedTools: ["Bash"] } }] }))).toThrow();
+    expect(() => parseRoutingTable(JSON.stringify({ policy: { toolset: "everything" } }))).toThrow();
   });
 });

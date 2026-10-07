@@ -35,7 +35,7 @@ function inbound(id: string, text: string, files: InboundMessage["files"] = [], 
 type Script = (sent: unknown, n: number, otid?: string) => SDKMessage[] | Error;
 
 function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean; readyGate?: Promise<void> } = {}) {
-  const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any, resumedIds: [] as string[] };
+  const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any, resumedIds: [] as string[], options: [] as any[] };
   let readyFails = opts.failReadyOnce ? 1 : 0;
   const client: LettaClientLike = {
     conversations: {
@@ -48,6 +48,7 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
       calls.resumes++;
       calls.resumedIds.push(_id);
       calls.canUseTool = options?.canUseTool;
+      calls.options.push(options);
       // Like the SDK: one queue for the session's lifetime; stream() ends at
       // each result and returns without one only once the session is closed.
       const queue: (SDKMessage | null)[] = [];
@@ -506,6 +507,70 @@ describe("routing table lanes", () => {
     expect(String(calls.sends[2])).toContain('chat_id="111"');
     expect(b1.c.events).toEqual([{ kind: "merged", intoMessageId: "b2" }]);
     expect(a2.c.events.at(-1)).toMatchObject({ kind: "done", success: true });
+  });
+
+  test("a route's tool policy shapes its session, and a pinned lane reopens when the policy differs", async () => {
+    const policyTable = parseRoutingTable(
+      JSON.stringify({
+        policy: { permissionMode: "standard" },
+        routes: [
+          { channel: "111", conversation: "conv-shared", policy: { toolset: "none", allowedTools: ["Read", "web_search"], approvalMode: "deny" } },
+          { channel: "222", conversation: "conv-shared" },
+        ],
+      }),
+    );
+    const { client, calls } = fakeClient(() => ok("hi"));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:"), routes: policyTable });
+    await submit(bridge, "a1", chanA).done;
+    expect(calls.options[0]).toMatchObject({ permissionMode: "standard", allowedTools: ["Read", "web_search"], toolset: { base: "none" } });
+    expect(await calls.canUseTool("Bash", { command: "ls" }, {})).toMatchObject({ behavior: "deny" });
+
+    await submit(bridge, "b1", chanB).done;
+    expect(calls.resumes).toBe(2); // same conversation, different policy: new session
+    expect(calls.closes).toBeGreaterThanOrEqual(1);
+    expect(calls.options[1].permissionMode).toBe("standard");
+    expect(calls.options[1].allowedTools).toBeUndefined();
+    expect(calls.options[1].toolset).toBeUndefined();
+
+    await submit(bridge, "b2", chanB).done;
+    expect(calls.resumes).toBe(2); // unchanged policy reuses the session
+  });
+
+  test("approvals use the turn route's approval mode", async () => {
+    const policyTable = parseRoutingTable(JSON.stringify({ routes: [{ channel: "111", policy: { approvalMode: "requester" } }] }));
+    const seen: unknown[] = [];
+    const { client, calls } = fakeClient(() => ok("hi"));
+    const resume = client.resumeSession.bind(client);
+    let decision: unknown;
+    client.resumeSession = (id, o) => {
+      const sess = resume(id, o);
+      const send = sess.send.bind(sess);
+      sess.send = async (m: any) => {
+        decision = await calls.canUseTool("Bash", { command: "ls" }, { toolCallId: "t1" });
+        return send(m);
+      };
+      return sess;
+    };
+    const bridge = createAgentBridge({ ...config, APPROVAL_MODE: "allow" }, { client, store: new RouteStore(":memory:"), routes: policyTable });
+    const c = ctxCollector("m1", chanA);
+    c.ctx.requestApproval = async (req) => {
+      seen.push(req);
+      return { allow: false, decidedBy: "u", message: "no" };
+    };
+    await bridge.submit([inbound("m1", "hi", [], chanA)], c.ctx);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ toolName: "Bash", approvalMode: "requester" });
+    expect(decision).toMatchObject({ behavior: "deny", message: "no" });
+  });
+
+  test("a 401 fails once with an operator hint instead of retrying", async () => {
+    const { client, calls } = fakeClient(() => new Error("401 Unauthorized"));
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:") });
+    const c = ctxCollector("m1", chanA);
+    await bridge.submit([inbound("m1", "hi", [], chanA)], c.ctx);
+    expect(calls.sends).toHaveLength(1);
+    expect(c.events).toContainEqual({ kind: "error", message: "Letta rejected this bot's credentials (HTTP 401). The operator should check the bot's logs." });
+    expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false });
   });
 
   test("a missing pinned conversation fails loudly instead of being replaced", async () => {

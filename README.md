@@ -254,8 +254,10 @@ one your other tools already use), point `ROUTES_FILE` at a JSON file like
   its channel and thread ids, and replies always go back where the message came from.
 - A pinned conversation is never replaced. If Letta reports it missing, the turn fails with an error
   instead of starting a new one, and `/new` is disabled on pinned routes. `/status` shows the rule.
-- The table only chooses conversations. Which messages the bot answers is still set by the gating
-  options above. Model, memory, and schedules stay whatever the conversation and agent already have.
+- A rule can also carry a `policy` that changes the tools and approvals on its surfaces, for
+  example no shell in a public channel. See [Tools and permissions](docs/tools-and-permissions.md).
+- Which messages the bot answers is still set by the gating options above. Model, memory, and
+  schedules stay whatever the conversation and agent already have.
 
 `bun run doctor` checks that the file parses and that every pinned conversation exists and belongs
 to `LETTA_AGENT_ID`. The listener refuses to start with an invalid table. Combine with
@@ -263,7 +265,8 @@ to `LETTA_AGENT_ID`. The listener refuses to start with an invalid table. Combin
 
 ## ✅ Approvals
 
-`APPROVAL_MODE` decides who signs off on a tool call. A request shows the tool name and a compact
+`APPROVAL_MODE` decides who signs off on a tool call. A routing-table `policy` can set a different
+`approvalMode` per surface, see [Tools and permissions](docs/tools-and-permissions.md). A request shows the tool name and a compact
 preview of its input, plus Approve and Deny buttons.
 
 | Value | Behavior |

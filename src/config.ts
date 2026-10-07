@@ -25,6 +25,13 @@ const int = (def: number) =>
     .transform((v) => (v === undefined || v === "" ? def : Number.parseInt(v, 10)))
     .pipe(z.number().int().nonnegative());
 
+export const PermissionModeSchema = z.enum(["strict", "standard", "acceptEdits", "unrestricted"]);
+export const ToolsetBaseSchema = z.enum(["auto", "default", "codex", "gemini", "none"]);
+export const ApprovalModeSchema = z.enum(["deny", "admins", "requester", "allow"]);
+export type PermissionMode = z.infer<typeof PermissionModeSchema>;
+export type ToolsetBase = z.infer<typeof ToolsetBaseSchema>;
+export type ApprovalMode = z.infer<typeof ApprovalModeSchema>;
+
 export const ConfigSchema = z.object({
   // Required credentials and target
   DISCORD_BOT_TOKEN: z.string().min(1, "DISCORD_BOT_TOKEN is required"),
@@ -37,12 +44,13 @@ export const ConfigSchema = z.object({
   SANDBOX_TTL_MINUTES: int(30),
 
   // Agent policy (operator-owned, never changeable from Discord)
-  PERMISSION_MODE: z.enum(["strict", "standard", "acceptEdits", "unrestricted"]).default("unrestricted"),
+  // Defaults for every route. A routing table entry can override them per route (see src/routing.ts).
+  PERMISSION_MODE: PermissionModeSchema.default("unrestricted"),
   ALLOWED_TOOLS: csv, // empty = harness default toolset
-  TOOLSET_BASE: z.enum(["auto", "default", "codex", "gemini", "none"]).optional(),
+  TOOLSET_BASE: ToolsetBaseSchema.optional(),
   CONVERSATION_MODEL: z.string().optional(), // pinned at conversation create
   ROUTES_FILE: z.string().optional(), // JSON routing table pinning Discord surfaces to existing conversations
-  APPROVAL_MODE: z.enum(["deny", "admins", "requester", "allow"]).default("allow"),
+  APPROVAL_MODE: ApprovalModeSchema.default("allow"),
   APPROVAL_TIMEOUT_SECONDS: int(300),
   TURN_TIMEOUT_SECONDS: int(900), // whole turn, including approval waits
   ENABLE_DISCORD_TOOLS: bool(true),

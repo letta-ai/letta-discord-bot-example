@@ -83,6 +83,8 @@ export interface ApprovalRequest {
   toolName: string;
   toolInput: Record<string, unknown>;
   toolCallId?: string;
+  /** The route's approval mode (routing-table policy, else APPROVAL_MODE). */
+  approvalMode?: "deny" | "admins" | "requester" | "allow";
 }
 
 export interface ApprovalDecision {

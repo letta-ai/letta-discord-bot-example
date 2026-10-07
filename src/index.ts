@@ -24,6 +24,7 @@ async function main() {
       rules: routes.routes.length,
       fallback: routes.fallback ?? "auto",
       conversations: pinnedConversations(routes),
+      policies: routes.routes.filter((e) => e.policy).length + (routes.policy ? 1 : 0),
     });
   }
 

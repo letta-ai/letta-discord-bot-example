@@ -405,6 +405,26 @@ export async function checkRoutingTable(fetchImpl: DoctorFetch, config: Config, 
   const results: CheckResult[] = [
     result("PASS", "Routing table", `${table.routes.length} rule(s), fallback ${table.fallback ?? "auto"}`, "No action needed."),
   ];
+  const policies = [
+    ...(table.policy ? [["all routes", table.policy] as const] : []),
+    ...table.routes.flatMap((e) => (e.policy ? [[describeRule(e), e.policy] as const] : [])),
+  ];
+  for (const [rule, policy] of policies) {
+    const parts = Object.entries(policy).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") || "(toolset defaults)" : v}`);
+    results.push(result("PASS", `Tool policy ${rule}`, parts.join(", ") || "inherits everything", "No action needed."));
+  }
+  const noAdmins = config.DISCORD_ADMIN_USER_IDS.length === 0 && config.DISCORD_ADMIN_ROLE_IDS.length === 0;
+  const adminOnly = policies.filter(([, p]) => p.approvalMode === "admins").map(([rule]) => rule);
+  if (noAdmins && adminOnly.length > 0) {
+    results.push(
+      result(
+        "WARN",
+        "Tool policy approvals",
+        `approvalMode admins on ${adminOnly.join(", ")} but no admin users or roles are configured, so nobody can approve tool calls there`,
+        "Set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS, or choose another approvalMode.",
+      ),
+    );
+  }
   for (const id of pinnedConversations(table)) {
     const check = `Pinned ${id}`;
     if (id === "default") {
@@ -495,6 +515,11 @@ export async function checkTranscription(fetchImpl: DoctorFetch, config: Config)
   } catch {
     return result("FAIL", "Transcription", `could not reach ${provider}`, "Check TRANSCRIBE_BASE_URL and network access.");
   }
+}
+
+function describeRule(entry: RoutingTable["routes"][number]): string {
+  const [kind, value] = Object.entries(entry).find(([k]) => k !== "conversation" && k !== "policy") ?? ["rule", "?"];
+  return `${kind}:${value}`;
 }
 
 /** APPROVAL_MODE=admins with no admins means every approval request times out. */

@@ -8,7 +8,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { replyModeFor, type Config, type ReplyMode } from "../config.ts";
 import { log } from "../log.ts";
-import { resolveRoute, type RoutingTable } from "../routing.ts";
+import { policyFor, resolveRoute, type RoutingTable, type ToolPolicy } from "../routing.ts";
 import {
   routeKeyString,
   type AgentBridge,
@@ -70,6 +70,8 @@ interface LaneState {
   session: LettaCodeSession | null;
   /** Reply mode the session's tools were built for. */
   sessionMode: ReplyMode | null;
+  /** Tool policy the session was opened with. */
+  sessionPolicy: ToolPolicy | null;
   conversationId: string | null;
   model?: string;
   busy: boolean;
@@ -117,6 +119,12 @@ export function toolLabel(name: string, input: Record<string, unknown>): string 
 export function assistantMessageId(msg: { uuid?: string; otid?: string | null }): string | undefined {
   if (typeof msg.uuid === "string" && msg.uuid.startsWith("message-")) return msg.uuid;
   return typeof msg.otid === "string" && msg.otid ? `otid:${msg.otid}` : undefined;
+}
+
+/** A rejected credential: retrying cannot help. */
+function isUnauthorized(err: unknown): boolean {
+  if ((err as { status?: unknown } | null)?.status === 401) return true;
+  return /\b401\b.*unauthorized|unauthorized.*\b401\b/i.test(err instanceof Error ? err.message : String(err));
 }
 
 /**
@@ -173,6 +181,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
         pinnedBy: pinned ? target.rule : null,
         session: null,
         sessionMode: null,
+        sessionPolicy: null,
         conversationId: pinned ? target.conversationId : (store.get(key)?.conversationId ?? null),
         busy: false,
         queue: [],
@@ -207,6 +216,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.idleTimer = null;
     s.sessionMode = null;
+    s.sessionPolicy = null;
     s.tracksRuns = false;
     s.bgRuns = null;
     endBackground(s);
@@ -247,10 +257,12 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
   function canUseTool(s: LaneState): CanUseToolCallback {
     return async (toolName, toolInput, context) => {
       const turn = s.current;
+      // Between turns (task notifications) there is nobody to ask, so the session's policy decides.
+      const approvalMode = turn ? policyFor(config, deps.routes, turn.route).approvalMode : s.sessionPolicy?.approvalMode;
       // Speaking in a tool-mode channel must never wait on an approver. The tool
       // only posts into this route, with mentions disabled.
-      if (config.APPROVAL_MODE === "allow" || toolName === "discord_send_message") return { behavior: "allow" };
-      if (config.APPROVAL_MODE === "deny" || !turn) {
+      if (approvalMode === "allow" || toolName === "discord_send_message") return { behavior: "allow" };
+      if (approvalMode === "deny" || !turn || !approvalMode) {
         return { behavior: "deny", message: `Tool ${toolName} requires approval, which is disabled for this Discord bot.` };
       }
       try {
@@ -260,6 +272,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
           toolName,
           toolInput,
           toolCallId: context?.toolCallId,
+          approvalMode,
         });
         return decision.allow
           ? { behavior: "allow", ...(decision.message ? { message: decision.message } : {}) }
@@ -336,10 +349,11 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     if (!s.busy) armIdle(s);
   }
 
-  async function ensureSession(s: LaneState, route: RouteKey, mode: ReplyMode): Promise<LettaCodeSession> {
-    // A pinned lane can serve routes with different reply modes, and the tool
-    // set is fixed per session, so switch sessions when the mode changes.
+  async function ensureSession(s: LaneState, route: RouteKey, mode: ReplyMode, policy: ToolPolicy): Promise<LettaCodeSession> {
+    // A pinned lane can serve routes with different reply modes and tool
+    // policies, and both are fixed per session, so switch sessions on a change.
     if (s.session && s.sessionMode !== mode) closeSession(s, "reply mode changed");
+    if (s.session && JSON.stringify(s.sessionPolicy) !== JSON.stringify(policy)) closeSession(s, "tool policy changed");
     if (s.session) return s.session;
     const conversationId = s.conversationId!;
     // Sandbox file client is only known after the session exists, so tools
@@ -359,14 +373,15 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       deps.toolFactory
         ? deps.toolFactory(route, () => s.current, config.LETTA_COMPUTER ? null : sandboxProxy)
         : [];
+    // The listener's own Discord tools stay available under any allowlist.
     const allowedTools =
-      config.ALLOWED_TOOLS.length > 0 ? [...new Set([...config.ALLOWED_TOOLS, ...tools.map((t) => t.name)])] : undefined;
+      policy.allowedTools.length > 0 ? [...new Set([...policy.allowedTools, ...tools.map((t) => t.name)])] : undefined;
     const options: LettaCodeClientSessionOptions = {
-      permissionMode: config.PERMISSION_MODE,
+      permissionMode: policy.permissionMode,
       canUseTool: canUseTool(s),
       ...(tools.length ? { tools } : {}),
       ...(allowedTools ? { allowedTools } : {}),
-      ...(config.TOOLSET_BASE ? { toolset: { base: config.TOOLSET_BASE } } : {}),
+      ...(policy.toolset ? { toolset: { base: policy.toolset } } : {}),
     };
     // The SDK resumes an agent's default conversation when given the agent id.
     const session = client.resumeSession(conversationId === "default" ? config.LETTA_AGENT_ID : conversationId, options);
@@ -381,9 +396,10 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     s.model = info.model;
     s.session = session;
     s.sessionMode = mode;
+    s.sessionPolicy = policy;
     s.bgRuns = new BackgroundRuns();
     void pump(s, session);
-    log.info("session ready", { route: s.key, conversationId, model: info.model, sandbox: !!sandboxRef, mode });
+    log.info("session ready", { route: s.key, conversationId, model: info.model, sandbox: !!sandboxRef, mode, policy });
     return session;
   }
 
@@ -511,10 +527,11 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
     // conversation and sandbox spin up (session start can take 10s+).
     emit({ kind: "started", conversationId: s.conversationId ?? "", createdConversation: !s.conversationId });
     const mode = replyModeFor(config, ctx.route);
+    const policy = policyFor(config, deps.routes, ctx.route);
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         await ensureConversation(s, ctx);
-        const session = await ensureSession(s, ctx.route, mode);
+        const session = await ensureSession(s, ctx.route, mode, policy);
         if (interruptedDuringSetup()) return;
         const attachments = await uploadFiles(s, session, batch, emit);
         if (interruptedDuringSetup()) return;
@@ -614,6 +631,18 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
             rule: s.pinnedBy,
           });
           emit({ kind: "error", message: `Pinned conversation ${s.conversationId} (${s.pinnedBy}) was not found.` });
+          emit({ kind: "done", success: false, errorCode: "error", durationMs: 0 });
+          return;
+        }
+        if (isUnauthorized(err)) {
+          // A rejected credential never succeeds on retry.
+          log.error("Letta returned 401 Unauthorized", {
+            route: s.key,
+            hint: config.LETTA_COMPUTER
+              ? "check LETTA_API_KEY and that it can reach LETTA_COMPUTER"
+              : "managed Cloud sandboxes currently reject some API keys on sandbox refresh (https://linear.app/letta/issue/LET-13714); check LETTA_API_KEY or set LETTA_COMPUTER",
+          });
+          emit({ kind: "error", message: "Letta rejected this bot's credentials (HTTP 401). The operator should check the bot's logs." });
           emit({ kind: "done", success: false, errorCode: "error", durationMs: 0 });
           return;
         }

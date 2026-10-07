@@ -88,7 +88,7 @@ export class ApprovalManager {
   }
 
   async request(channel: ApprovalChannel, req: ApprovalRequest, isAdmin: IsAdmin): Promise<ApprovalDecision> {
-    const mode = this.config.APPROVAL_MODE;
+    const mode = req.approvalMode ?? this.config.APPROVAL_MODE;
     if (mode === "allow") return { allow: true };
     if (mode === "deny") {
       return { allow: false, message: `Tool ${req.toolName} requires approval, which is disabled for this Discord bot.` };
@@ -173,7 +173,7 @@ export class ApprovalManager {
       admin = p.isAdmin(userId, roles);
     } catch {}
     if (admin) return true;
-    return this.config.APPROVAL_MODE === "requester" && userId === p.req.requesterId;
+    return (p.req.approvalMode ?? this.config.APPROVAL_MODE) === "requester" && userId === p.req.requesterId;
   }
 
   private settle(id: string, decision: ApprovalDecision): Pending | null {
