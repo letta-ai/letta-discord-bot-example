@@ -163,7 +163,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `DISCORD_ADMIN_USER_IDS` | empty (CSV) | Users who count as admins for approvals and detailed `/status`. |
 | `DISCORD_ADMIN_ROLE_IDS` | empty (CSV) | Roles that count as admins. |
 | `DM_POLICY` | `allowlist` | `off`, `allowlist` or `open`. |
-| `RESPOND_TO_BOTS` | `false` | Answer messages from other bots. |
+| `RESPOND_TO_BOTS` | `false` | Accept another bot only when it mentions or replies to this bot. |
 | `AUTO_THREAD` | `true` | Create a public thread when mentioned in a normal channel. |
 | `REGISTER_SLASH_COMMANDS` | `true` | Register `/new` `/cancel` `/status` `/help` on startup. |
 | `STREAM_EDITS` | `false` | Post the reply once when the turn finishes. Set `true` to stream by editing one message as text arrives. |
@@ -198,7 +198,8 @@ A route is one Discord surface: `(guild, channel, thread)`, or the DM channel.
 - In a channel listed in `DISCORD_OPEN_CHANNEL_IDS` the bot answers every message, the channel is
   the route.
 - DMs route to the DM channel, subject to `DM_POLICY`.
-- Messages from the bot itself are always ignored, and other bots unless `RESPOND_TO_BOTS=true`.
+- Messages from this bot are always ignored. Another bot is accepted only when
+  `RESPOND_TO_BOTS=true` and it mentions or replies to this bot.
 
 ### Open channels
 
@@ -327,11 +328,11 @@ failed transcription never drops the message; the attachment carries `transcript
 
 | Provider | Default model | Notes |
 | --- | --- | --- |
-| `groq` | `whisper-large-v3-turbo` | Fastest in testing, about 0.4 seconds for a 19-second clip. Accepts Ogg/Opus. |
-| `deepgram` | `nova-3` | Accepts Ogg/Opus directly; detects language unless `TRANSCRIBE_LANGUAGE` is set. |
-| `openai` | `gpt-4o-mini-transcribe` | Also `gpt-4o-transcribe`, `whisper-1`. All three accept Ogg/Opus. In testing it was the most accurate on product names, at about 2 seconds for a 19-second clip. |
+| `groq` | `whisper-large-v3-turbo` | OpenAI-compatible transcription request. |
+| `deepgram` | `nova-3` | Sends raw audio and detects language unless `TRANSCRIBE_LANGUAGE` is set. |
+| `openai` | `gpt-4o-mini-transcribe` | OpenAI transcription request. |
 | `elevenlabs` | `scribe_v2` | |
-| `assemblyai` | `universal-3-5-pro` | Upload and poll; slower for short clips. |
+| `assemblyai` | `universal-3-5-pro` | Upload, create, and poll workflow. |
 | `mistral` | `voxtral-mini-latest` | |
 | `together` | `openai/whisper-large-v3` | |
 | `gemini` | `gemini-3.8-flash` | Prompted transcription; inline audio up to 20 MB. |
