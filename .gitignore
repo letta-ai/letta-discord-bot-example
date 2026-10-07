@@ -1,4 +1,45 @@
+# dependencies (bun install)
 node_modules
+
+# runtime state: route -> conversation index (bun:sqlite)
+data/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-journal
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_*.json
+
+# dotenv environment variable files (keep .env.example)
 .env
-dist/
-.letta/
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# local deploy configs (keep the .example files)
+fly.toml
+railway.toml
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# editors
+.idea
+.vscode
+.DS_Store

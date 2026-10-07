@@ -1,32 +1,22 @@
 {
-  "name": "discord-bot",
-  "version": "1.0.0",
-  "main": "index.js",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node dist/server.js",
-    "build": "tsc",
-    "dev": "ts-node-dev src/server.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "@letta-ai/letta-client": "^1.6.2",
-    "discord.js": "^14.18.0",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "openai": "^6.15.0"
-  },
+  "name": "letta-discord-listener",
+  "type": "module",
+  "private": true,
   "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.13.4",
-    "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.9.2"
+    "@types/bun": "^1.4.2",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "@letta-ai/letta-agent-sdk": "^0.8.30",
+    "discord.js": "^14.27.0",
+    "zod": "^4.6.5"
+  },
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "doctor": "bun run src/doctor.ts",
+    "dev": "bun --watch run src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p ."
   }
 }

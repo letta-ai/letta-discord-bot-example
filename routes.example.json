@@ -1,0 +1,10 @@
+{
+  "routes": [
+    { "channel": "123456789012345678", "conversation": "conv-00000000-0000-0000-0000-000000000000" },
+    { "thread": "223456789012345678", "conversation": "conv-00000000-0000-0000-0000-000000000000" },
+    { "dm": "323456789012345678", "conversation": "default" },
+    { "channel": "423456789012345678", "conversation": "auto" },
+    { "channel": "523456789012345678", "policy": { "toolset": "none", "allowedTools": ["web_search"], "approvalMode": "deny" } }
+  ],
+  "fallback": "auto"
+}
