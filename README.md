@@ -144,7 +144,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `LETTA_API_KEY` | required | Letta API key. |
 | `LETTA_AGENT_ID` | required | Target agent id, must start with `agent-`. |
 | `LETTA_BASE_URL` | unset | Letta API base URL, for self hosted Letta. |
-| `LETTA_COMPUTER` | unset | Custom sandbox target. Unset means an SDK-managed Cloud sandbox per conversation. |
+| `LETTA_COMPUTER` | unset | Connected computer for tool execution. Unset means an SDK-managed Cloud sandbox per conversation. |
 | `SANDBOX_TTL_MINUTES` | `30` | Idle lifetime of each managed conversation sandbox, clamped to 1-60 minutes. |
 | `PERMISSION_MODE` | `unrestricted` | `strict`, `standard`, `acceptEdits` or `unrestricted` (bypass permission checks). |
 | `ALLOWED_TOOLS` | empty (CSV) | Tool allowlist. Empty uses the harness default toolset. |
@@ -356,7 +356,7 @@ explains why Modal is a poor fit.
 | | Letta Code Channels | This listener |
 |---|---|---|
 | Discord token | Held by Letta | Held by you, in the listener env |
-| Sandbox per conversation | Yes, managed by Letta | Yes, SDK managed Cloud sandbox |
+| Execution environment | Managed by Letta | SDK-managed Cloud sandbox by default, or a connected computer |
 | Agent configuration | Changed from chat | Env only, operator owned |
 | Commands | Harness commands included | `/new` `/cancel` `/status` `/help` only |
 | Hosting | Letta runs it | You run and secure it |
