@@ -160,7 +160,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `REGISTER_SLASH_COMMANDS` | `true` | Register `/new` `/cancel` `/status` `/help` on startup. |
 | `STREAM_EDITS` | `false` | Post the reply once when the turn finishes. Set `true` to stream by editing one message as text arrives. |
 | `STREAM_EDIT_INTERVAL_MS` | `1200` | Minimum gap between streaming edits. |
-| `SHOW_TOOL_CALLS` | `false` | Post a small line for each tool call, interleaved with the reply text in the order they happened. |
+| `SHOW_TOOL_CALLS` | `false` | Post tool calls as compact cards interleaved with the reply text, each line marked running, done or failed with its duration. |
 | `SHOW_REASONING` | `false` | Stream reasoning summaries as a separate message. |
 | `LIFECYCLE_REACTIONS` | `false` | When on, react to the triggering message when a turn succeeds (✅), fails (❌) or is cancelled (⏹️). |
 | `DEBOUNCE_MS` | `1500` | Merge messages arriving in this window into one turn. |

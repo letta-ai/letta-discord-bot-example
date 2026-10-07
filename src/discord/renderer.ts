@@ -6,8 +6,8 @@ import { splitForDiscord } from "./split.ts";
 /**
  * Renders the normalized TurnEvent stream of one turn into Discord messages:
  * lifecycle reactions, typing indicator, streamed (or one-shot) reply text,
- * optional tool-call lines interleaved with that text in the order they
- * happened, and an optional in-place reasoning line.
+ * optional tool-call cards (Components V2) interleaved with that text in
+ * the order they happened, and an optional in-place reasoning line.
  */
 
 type MentionType = "users" | "roles" | "everyone";
@@ -16,9 +16,16 @@ export interface RenderPayload {
   allowedMentions: { parse: readonly MentionType[] };
 }
 
+/** A Components V2 message (raw API JSON). Carries no `content`. */
+export interface CardPayload {
+  components: unknown[];
+  flags: number;
+  allowedMentions: { parse: readonly MentionType[] };
+}
+
 /** Narrow view of a discord.js Message. */
 export interface RenderMessage {
-  edit(options: RenderPayload): Promise<unknown>;
+  edit(options: RenderPayload | CardPayload): Promise<unknown>;
   delete(): Promise<unknown>;
   react(emoji: string): Promise<unknown>;
   reply?(options: RenderPayload & { failIfNotExists?: boolean }): Promise<RenderMessage>;
@@ -29,7 +36,7 @@ export interface RenderMessage {
 
 /** Narrow view of a discord.js text-based channel. */
 export interface RenderChannel {
-  send(options: RenderPayload): Promise<RenderMessage>;
+  send(options: RenderPayload | CardPayload): Promise<RenderMessage>;
   sendTyping(): Promise<unknown>;
   isThread?(): boolean;
 }
@@ -46,6 +53,8 @@ export interface TurnRendererOptions {
    * Failures still are. Defaults to `relay`.
    */
   replyMode?: ReplyMode;
+  /** Clock for tool durations. Overridable for tests. */
+  now?: () => number;
 }
 
 export const FAILURE_TEXT =
@@ -53,7 +62,11 @@ export const FAILURE_TEXT =
 
 const NO_MENTIONS = { parse: [] as readonly MentionType[] };
 const REASONING_MAX = 180;
-const TOOL_BLOCK_MAX = 1900;
+const TOOL_CARD_MAX_LINES = 20;
+const IS_COMPONENTS_V2 = 1 << 15;
+const CONTAINER = 17;
+const TEXT_DISPLAY = 10;
+const ACCENT = { running: 0x80848e, ok: 0x57f287, error: 0xed4245 } as const;
 
 export class TurnRenderer {
   readonly finished: Promise<void>;
@@ -63,6 +76,7 @@ export class TurnRenderer {
   private readonly trigger: RenderMessage;
   private readonly typingIntervalMs: number;
   private readonly quiet: boolean; // tool reply mode
+  private readonly now: () => number;
   private droppedChars = 0;
 
   private chain: Promise<void> = Promise.resolve();
@@ -80,9 +94,11 @@ export class TurnRenderer {
   private lastTextSync = 0;
   private postedAny = false; // any message (text or failure) has replied to the trigger
 
-  // tool calls: consecutive calls share one message; assistant text in
-  // between starts a new one, so the channel reads in event order.
+  // tool calls: consecutive calls share one card; assistant text in between
+  // starts a new one, so the channel reads in event order.
   private toolBlock: ToolBlock | null = null;
+  private toolBlocks: ToolBlock[] = [];
+  private toolEntries = new Map<string, { block: ToolBlock; entry: ToolEntry }>();
 
   // reasoning line
   private statusMsg: RenderMessage | null = null;
@@ -99,6 +115,7 @@ export class TurnRenderer {
     this.trigger = opts.triggerMessage;
     this.typingIntervalMs = opts.typingIntervalMs ?? 8000;
     this.quiet = opts.replyMode === "tool";
+    this.now = opts.now ?? Date.now;
     this.finished = new Promise<void>((r) => {
       this.resolveFinished = r;
     });
@@ -141,11 +158,19 @@ export class TurnRenderer {
         this.endSegment();
         if (this.quiet || !this.config.SHOW_TOOL_CALLS) return;
         this.reasoning = "";
-        this.addToolLine(e.summary || e.toolName);
+        this.addToolEntry(e.toolCallId, { label: e.summary || e.toolName, start: this.now() });
         return;
+      case "tool_result": {
+        const hit = this.toolEntries.get(e.toolCallId);
+        if (!hit || hit.entry.end !== undefined) return;
+        hit.entry.end = this.now();
+        hit.entry.isError = e.isError;
+        this.queueToolSync(hit.block);
+        return;
+      }
       case "retry":
         if (this.quiet || !this.config.SHOW_TOOL_CALLS) return;
-        this.addToolLine(`Retrying (attempt ${e.attempt}/${e.maxAttempts})`);
+        this.addToolEntry(null, { label: `Retrying (attempt ${e.attempt}/${e.maxAttempts})`, start: this.now(), retry: true });
         return;
       case "merged":
         this.ended = true;
@@ -279,30 +304,49 @@ export class TurnRenderer {
 
   // ---- tool calls ---------------------------------------------------------
 
-  private addToolLine(label: string): void {
-    const line = `-# ${truncate(label.replace(/\s+/g, " ").trim(), 300)}`;
+  private addToolEntry(toolCallId: string | null, entry: ToolEntry): void {
+    entry.label = truncate(entry.label.replace(/\s+/g, " ").trim(), 200);
     let block = this.toolBlock;
-    if (!block || block.lines.join("\n").length + line.length + 1 > TOOL_BLOCK_MAX) {
-      block = this.toolBlock = { msg: null, content: "", lines: [], queued: false };
+    if (!block || block.entries.length >= TOOL_CARD_MAX_LINES) {
+      block = this.toolBlock = { msg: null, sent: "", entries: [], queued: false, plain: false };
+      this.toolBlocks.push(block);
     }
-    block.lines.push(line);
-    if (block.queued) return; // the queued sync renders every line added before it runs
-    block.queued = true;
-    const b = block;
-    this.enqueue(() => this.syncToolBlock(b));
+    block.entries.push(entry);
+    if (toolCallId) this.toolEntries.set(toolCallId, { block, entry });
+    this.queueToolSync(block);
   }
 
-  /** Post or edit a tool block. Not a reply and leaves typing on: the agent is still working. */
+  private queueToolSync(block: ToolBlock): void {
+    if (block.queued) return; // the queued sync renders every change made before it runs
+    block.queued = true;
+    this.enqueue(() => this.syncToolBlock(block));
+  }
+
+  /**
+   * Post or edit a tool card. Not a reply and leaves typing on: the agent is
+   * still working. Falls back to plain `-#` lines if Discord rejects the card.
+   */
   private async syncToolBlock(block: ToolBlock): Promise<void> {
     block.queued = false;
-    const content = block.lines.join("\n");
+    const payload = block.plain ? toolPlain(block) : toolCard(block);
+    const key = JSON.stringify(payload);
+    if (key === block.sent) return;
     if (!block.msg) {
-      block.msg = await this.channel.send({ content, allowedMentions: NO_MENTIONS });
-      block.content = content;
-    } else if (content !== block.content) {
-      await block.msg.edit({ content, allowedMentions: NO_MENTIONS });
-      block.content = content;
+      try {
+        block.msg = await this.channel.send(payload);
+      } catch (err) {
+        if (block.plain) throw err;
+        log.warn("tool card rejected; falling back to plain lines", { err: String(err) });
+        block.plain = true;
+        const plain = toolPlain(block);
+        block.msg = await this.channel.send(plain);
+        block.sent = JSON.stringify(plain);
+        return;
+      }
+    } else {
+      await block.msg.edit(payload);
     }
+    block.sent = key;
   }
 
   // ---- reasoning line -----------------------------------------------------
@@ -360,6 +404,18 @@ export class TurnRenderer {
     const last = this.seg;
     this.enqueue(() => this.syncText(last));
 
+    // Calls that never reported a result are marked stopped, not left spinning.
+    for (const block of this.toolBlocks) {
+      let changed = false;
+      for (const entry of block.entries) {
+        if (entry.end === undefined && !entry.retry && !entry.stopped) {
+          entry.stopped = true;
+          changed = true;
+        }
+      }
+      if (changed) this.queueToolSync(block);
+    }
+
     if (!e.success && !interrupted) {
       this.enqueue(async () => {
         if (!this.postedText) await this.post(FAILURE_TEXT);
@@ -384,11 +440,58 @@ export class TurnRenderer {
   }
 }
 
+interface ToolEntry {
+  label: string;
+  start: number;
+  end?: number;
+  isError?: boolean;
+  retry?: boolean;
+  stopped?: boolean; // the turn ended before a result arrived
+}
+
 interface ToolBlock {
   msg: RenderMessage | null;
-  content: string;
-  lines: string[];
+  sent: string; // last payload sent, serialized
+  entries: ToolEntry[];
   queued: boolean;
+  plain: boolean; // Discord rejected the card; render `-#` lines instead
+}
+
+function toolLine(e: ToolEntry): string {
+  if (e.retry) return `↻ ${e.label}`;
+  if (e.end === undefined) return `${e.stopped ? "■" : "◌"} ${e.label}`;
+  return `${e.isError ? "✗" : "✓"} ${e.label} · ${formatDuration(e.end - e.start)}`;
+}
+
+function toolCard(block: ToolBlock): CardPayload {
+  const { entries } = block;
+  const accent = entries.some((e) => e.isError)
+    ? ACCENT.error
+    : entries.every((e) => e.retry || e.end !== undefined)
+      ? ACCENT.ok
+      : ACCENT.running;
+  return {
+    flags: IS_COMPONENTS_V2,
+    components: [
+      {
+        type: CONTAINER,
+        accent_color: accent,
+        components: [{ type: TEXT_DISPLAY, content: entries.map(toolLine).join("\n") }],
+      },
+    ],
+    allowedMentions: NO_MENTIONS,
+  };
+}
+
+function toolPlain(block: ToolBlock): RenderPayload {
+  return { content: block.entries.map((e) => `-# ${toolLine(e)}`).join("\n"), allowedMentions: NO_MENTIONS };
+}
+
+export function formatDuration(ms: number): string {
+  if (ms < 100) return "<0.1s";
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 interface Segment {

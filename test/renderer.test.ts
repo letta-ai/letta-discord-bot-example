@@ -3,10 +3,29 @@ import type { Config } from "../src/config.ts";
 import {
   FAILURE_TEXT,
   TurnRenderer,
+  formatDuration,
+  type CardPayload,
   type RenderChannel,
   type RenderMessage,
   type RenderPayload,
 } from "../src/discord/renderer.ts";
+
+type AnyPayload = RenderPayload | CardPayload;
+interface Card {
+  accent: number;
+  text: string;
+}
+/** Text of a payload: plain content, or a card's TextDisplay content. */
+function cardOf(p: AnyPayload): Card | null {
+  if (!("components" in p)) return null;
+  expect(p.flags).toBe(1 << 15);
+  const container = p.components[0] as { type: number; accent_color: number; components: { type: number; content: string }[] };
+  expect(container.type).toBe(17);
+  return { accent: container.accent_color, text: container.components.map((c) => c.content).join("\n") };
+}
+function textOf(p: AnyPayload): string {
+  return "components" in p ? `[card] ${cardOf(p)!.text}` : p.content;
+}
 
 function config(overrides: Partial<Config> = {}): Config {
   return {
@@ -21,7 +40,8 @@ function config(overrides: Partial<Config> = {}): Config {
 
 class FakeMessage implements RenderMessage {
   content: string;
-  edits: RenderPayload[] = [];
+  card: Card | null = null;
+  edits: AnyPayload[] = [];
   deleted = false;
   reacted: string[] = [];
   replies: FakeMessage[] = [];
@@ -39,8 +59,9 @@ class FakeMessage implements RenderMessage {
     this.content = content;
   }
 
-  async edit(options: RenderPayload) {
-    this.content = options.content;
+  async edit(options: AnyPayload) {
+    this.content = textOf(options);
+    this.card = cardOf(options);
     this.edits.push(options);
     return this;
   }
@@ -64,10 +85,13 @@ class FakeMessage implements RenderMessage {
 class FakeChannel implements RenderChannel {
   sent: FakeMessage[] = [];
   typing = 0;
+  rejectCards = false;
   constructor(private readonly thread = false) {}
-  async send(options: RenderPayload) {
+  async send(options: AnyPayload) {
     expect(options.allowedMentions.parse).toEqual([]);
-    const msg = new FakeMessage(options.content);
+    if (this.rejectCards && "components" in options) throw new Error("Invalid Form Body");
+    const msg = new FakeMessage(textOf(options));
+    msg.card = cardOf(options);
     this.sent.push(msg);
     return msg;
   }
@@ -139,7 +163,7 @@ describe("TurnRenderer", () => {
     const channel = new FakeChannel(true);
     const trigger = new FakeMessage();
     const renderer = new TurnRenderer({ config: config({ STREAM_EDITS: false }), channel, triggerMessage: trigger });
-    const texts = () => channel.sent.map((m) => m.content).filter((c) => !c.startsWith("-#"));
+    const texts = () => channel.sent.map((m) => m.content).filter((c) => !c.startsWith("[card]"));
 
     renderer.onEvent({ kind: "started", conversationId: "c", createdConversation: false });
     renderer.onEvent({ kind: "assistant_delta", text: "Not saved locally, ", messageId: "message-a" });
@@ -225,29 +249,84 @@ describe("TurnRenderer", () => {
     expect(trigger.reacted).toEqual(["❌"]);
   });
 
-  test("interleaves tool calls with assistant messages in event order", async () => {
+  test("interleaves tool cards with assistant messages in event order", async () => {
     const channel = new FakeChannel(true);
     const trigger = new FakeMessage();
-    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger });
+    let t = 0;
+    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger, now: () => t });
 
     renderer.onEvent({ kind: "assistant_delta", text: "Let me look.", messageId: "a1" });
     renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Grep", summary: "Search memory" });
+    t = 400;
+    renderer.onEvent({ kind: "tool_result", toolCallId: "1", isError: false });
     renderer.onEvent({ kind: "tool_call", toolCallId: "2", toolName: "Read", summary: "Read notes.md" });
+    t = 1600;
+    renderer.onEvent({ kind: "tool_result", toolCallId: "2", isError: false });
     renderer.onEvent({ kind: "assistant_delta", text: "Found it.", messageId: "a2" });
     renderer.onEvent({ kind: "tool_call", toolCallId: "3", toolName: "Bash", summary: "bun test" });
     renderer.onEvent({ kind: "retry", attempt: 2, maxAttempts: 3 });
+    t = 2000;
+    renderer.onEvent({ kind: "tool_result", toolCallId: "3", isError: false });
     renderer.onEvent({ kind: "assistant_delta", text: "Done.", messageId: "a3" });
     renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
     await renderer.finished;
 
     expect(channel.sent.map((m) => m.content)).toEqual([
       "Let me look.",
-      "-# Search memory\n-# Read notes.md", // consecutive calls share a message
+      "[card] ✓ Search memory · 0.4s\n✓ Read notes.md · 1.2s", // consecutive calls share a card
       "Found it.",
-      "-# bun test\n-# Retrying (attempt 2/3)",
+      "[card] ✓ bun test · 0.4s\n↻ Retrying (attempt 2/3)",
       "Done.",
     ]);
+    expect(channel.sent[1]!.card!.accent).toBe(0x57f287);
     expect(channel.sent.some((m) => m.deleted)).toBe(false); // the record stays
+  });
+
+  test("a running call shows as running, and a failed call turns the card red", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    let t = 0;
+    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger, now: () => t });
+
+    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "bun test" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(channel.sent[0]!.card).toEqual({ accent: 0x80848e, text: "◌ bun test" });
+
+    t = 2500;
+    renderer.onEvent({ kind: "tool_result", toolCallId: "1", isError: true });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+    expect(channel.sent[0]!.card).toEqual({ accent: 0xed4245, text: "✗ bun test · 2.5s" });
+  });
+
+  test("calls without a result are marked stopped when the turn ends", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger, now: () => 0 });
+
+    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "sleep 600" });
+    renderer.onEvent({ kind: "done", success: false, errorCode: "interrupted", durationMs: 1 });
+    await renderer.finished;
+    expect(channel.sent[0]!.card!.text).toBe("■ sleep 600");
+  });
+
+  test("falls back to plain subtext lines if Discord rejects the card", async () => {
+    const channel = new FakeChannel(true);
+    channel.rejectCards = true;
+    const trigger = new FakeMessage();
+    let t = 0;
+    const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger, now: () => t });
+
+    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "bun test" });
+    t = 300;
+    renderer.onEvent({ kind: "tool_result", toolCallId: "1", isError: false });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+    expect(channel.sent.map((m) => m.content)).toEqual(["-# ✓ bun test · 0.3s"]);
+  });
+
+  test("formats durations", () => {
+    expect([50, 400, 12_340, 61_000, 3_725_000].map(formatDuration)).toEqual(["<0.1s", "0.4s", "12.3s", "1m 1s", "62m 5s"]);
   });
 
   test("tool calls are hidden unless SHOW_TOOL_CALLS is on", async () => {
@@ -264,14 +343,14 @@ describe("TurnRenderer", () => {
     expect(channel.sent.map((m) => m.content)).toEqual(["One.", "Two."]);
   });
 
-  test("tool status shows only the label, no wrench or tool name", async () => {
+  test("tool card shows only the label, no wrench or tool name", async () => {
     const channel = new FakeChannel(true);
     const trigger = new FakeMessage();
     const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger });
 
     renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "Check system info" });
     await new Promise((r) => setTimeout(r, 20));
-    expect(channel.sent.map((m) => m.content)).toContain("-# Check system info");
+    expect(channel.sent.map((m) => m.content)).toContain("[card] ◌ Check system info");
 
     renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
     await renderer.finished;

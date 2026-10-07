@@ -84,9 +84,11 @@ Rendering
 - Typing indicator refreshed every 8s until the first visible text or done.
 - `STREAM_EDITS`: post one message on first text, edit at most every `STREAM_EDIT_INTERVAL_MS`; when it exceeds the
   limit, finalize and continue in a new message. Otherwise post the full reply once on done.
-- `SHOW_TOOL_CALLS` (off by default): each tool call ends the current text segment and posts a `-#` line
-  after it. Consecutive calls share one message; the next assistant text starts below it, so the channel
-  reads in event order. The lines stay after the turn.
+- `SHOW_TOOL_CALLS` (off by default): each tool call ends the current text segment and posts a Components V2
+  card after it (container + text display, accent gray running / green done / red on any error). Consecutive
+  calls share one card, one line each (`◌` running, `✓`/`✗` with duration on `tool_result`, `■` if the turn
+  ended first); the next assistant text starts below it, so the channel reads in event order. Cards stay
+  after the turn. If Discord rejects a card, that block falls back to `-#` subtext lines.
 - Failure: short user-facing line, never raw internal errors or ids.
 
 Approvals (`APPROVAL_MODE`)
