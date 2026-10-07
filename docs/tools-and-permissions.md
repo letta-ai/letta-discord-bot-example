@@ -40,9 +40,11 @@ which is all this bot does, so "everything except Bash" has to be written as an 
 `unrestricted`). Calls the mode does not auto-allow go to `APPROVAL_MODE`, which decides who signs
 off in Discord (`deny`, `admins`, `requester`, `allow`, see [Approvals](../README.md#-approvals)).
 
-The defaults are `PERMISSION_MODE=unrestricted` and `APPROVAL_MODE=allow`: every call runs without
-asking. That suits a private server. If untrusted people can reach the bot, remove the tools you do
-not want them to have, then use `APPROVAL_MODE=admins` or `requester` for what remains.
+The defaults are `PERMISSION_MODE=standard` and `APPROVAL_MODE=admins`. `standard` runs read-only
+calls on its own: `Read`, `Glob`, `Grep` and similar inside the working directory, read-only shell
+commands, and the agent's own memory writes. Everything else needs an admin's click, and with no
+`DISCORD_ADMIN_USER_IDS` or `DISCORD_ADMIN_ROLE_IDS` it is denied. For a private server where
+everyone is trusted, `PERMISSION_MODE=unrestricted` with `APPROVAL_MODE=allow` never asks.
 
 Approvals are a second line of defense, not a substitute for removing tools. They only see the
 calls the permission mode sends for approval, and `unrestricted` sends none.

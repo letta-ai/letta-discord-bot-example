@@ -420,7 +420,7 @@ export async function checkRoutingTable(fetchImpl: DoctorFetch, config: Config, 
       result(
         "WARN",
         "Tool policy approvals",
-        `approvalMode admins on ${adminOnly.join(", ")} but no admin users or roles are configured, so nobody can approve tool calls there`,
+        `approvalMode admins on ${adminOnly.join(", ")} but no admin users or roles are configured, so tool calls needing approval are denied there`,
         "Set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS, or choose another approvalMode.",
       ),
     );
@@ -522,15 +522,15 @@ function describeRule(entry: RoutingTable["routes"][number]): string {
   return `${kind}:${value}`;
 }
 
-/** APPROVAL_MODE=admins with no admins means every approval request times out. */
+/** APPROVAL_MODE=admins (the default) with no admins means every call that needs approval is denied. */
 export function checkApprovers(config: Config): CheckResult {
   const noAdmins = config.DISCORD_ADMIN_USER_IDS.length === 0 && config.DISCORD_ADMIN_ROLE_IDS.length === 0;
   if (config.APPROVAL_MODE === "admins" && noAdmins) {
     return result(
       "WARN",
       "Approvals",
-      "APPROVAL_MODE=admins but no admin users or roles are configured, so nobody can approve tool calls",
-      "Set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS, or choose another APPROVAL_MODE.",
+      `APPROVAL_MODE=admins with no admin users or roles: tool calls that PERMISSION_MODE=${config.PERMISSION_MODE} does not auto-allow are denied`,
+      "Set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS so someone can approve them, or choose another APPROVAL_MODE.",
     );
   }
   if (config.APPROVAL_MODE === "allow") {

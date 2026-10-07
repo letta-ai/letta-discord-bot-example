@@ -14,6 +14,8 @@ function config(overrides: Partial<Config> = {}): Config {
   return {
     APPROVAL_MODE: "admins",
     APPROVAL_TIMEOUT_SECONDS: 1,
+    DISCORD_ADMIN_USER_IDS: ["admin"],
+    DISCORD_ADMIN_ROLE_IDS: [],
     ...overrides,
   } as Config;
 }
@@ -83,8 +85,15 @@ function customId(channel: FakeChannel, action: "approve" | "deny") {
 }
 
 describe("ApprovalManager", () => {
-  test("allow and deny modes return without posting", async () => {
+  test("allow, deny, and admins without any admins return without posting", async () => {
     const channel = new FakeChannel();
+    const noAdmins = new ApprovalManager({ config: config({ DISCORD_ADMIN_USER_IDS: [] }) });
+    const sent: unknown[] = [];
+    const decision = await noAdmins.request({ send: async (p: unknown) => (sent.push(p), {} as never) } as never, request(), () => false);
+    expect(decision.allow).toBe(false);
+    expect(decision.message).toContain("no admins configured");
+    expect(sent).toHaveLength(0); // no buttons nobody could click
+
     const allow = new ApprovalManager({ config: config({ APPROVAL_MODE: "allow" }) });
     const deny = new ApprovalManager({ config: config({ APPROVAL_MODE: "deny" }) });
     expect(await allow.request(channel, request(), () => false)).toEqual({ allow: true });

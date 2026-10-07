@@ -93,6 +93,13 @@ export class ApprovalManager {
     if (mode === "deny") {
       return { allow: false, message: `Tool ${req.toolName} requires approval, which is disabled for this Discord bot.` };
     }
+    if (mode === "admins" && this.config.DISCORD_ADMIN_USER_IDS.length === 0 && this.config.DISCORD_ADMIN_ROLE_IDS.length === 0) {
+      // Buttons nobody may click would only stall the turn until the timeout.
+      return {
+        allow: false,
+        message: `Tool ${req.toolName} needs an admin's approval, and this Discord bot has no admins configured.`,
+      };
+    }
 
     const id = randomUUID().replace(/-/g, "").slice(0, 16);
     const timeoutSeconds = this.config.APPROVAL_TIMEOUT_SECONDS;

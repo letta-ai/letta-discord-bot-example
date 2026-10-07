@@ -31,7 +31,7 @@ The current contract uses Discord-shaped field names in `RouteKey` and attachmen
 | `src/index.ts` | Load config and routes, construct the store, bridge, Discord client, and health server, then handle shutdown. |
 | `src/config.ts` | Validate environment configuration and select relay or tool reply mode. |
 | `src/types.ts` | Define the core and adapter contract. |
-| `src/routing.ts` | Parse the optional routing table and resolve a route to automatic or pinned conversation selection. |
+| `src/routing.ts` | Parse the optional routing table, resolve a route to automatic or pinned conversation selection, and resolve its tool policy. |
 | `src/log.ts` | Emit level-filtered JSON logs. |
 | `src/health.ts` | Serve `/` and `/healthz` with Discord readiness and stored route count. |
 | `src/doctor.ts` | Validate config, credentials, permissions, routes, execution target, transcription, and storage. |
@@ -74,7 +74,7 @@ client.conversations.create({
 
 There is no `hidden` option. The resulting conversation id is stored in `RouteStore`. A pinned target is never created, replaced after a missing-conversation error, or reset by `/new`. The special target `default` resumes the agent id because the SDK treats that as the agent's default conversation.
 
-The bridge opens a session with the configured permission mode, approval callback, listener tools, optional allowed tools and toolset base. The `LettaAgentClient` gets either a named `computer` or an SDK-managed Cloud sandbox with a TTL clamped to 1 through 60 minutes. A session closes after `SESSION_IDLE_MINUTES`, on reset, error, reply-mode change, or shutdown. The Letta conversation remains.
+The bridge opens a session with the route's tool policy (permission mode, allowed tools, toolset base, and approval mode, each from the most specific routing-table entry that sets it, else the table `policy`, else env), plus the approval callback and listener tools. The `LettaAgentClient` gets either a named `computer` or an SDK-managed Cloud sandbox with a TTL clamped to 1 through 60 minutes. A session closes after `SESSION_IDLE_MINUTES`, on reset, error, reply-mode change, tool-policy change (a pinned lane serving surfaces with different policies), or shutdown. The Letta conversation remains.
 
 Each lane runs one turn at a time. Consecutive queued items from the same route merge into one batch, while a lane shared by pinned routes never merges across routes. A cancellation drops matching queued turns and aborts the active session when that route owns the current turn.
 
