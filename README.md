@@ -33,8 +33,8 @@
   into each other.
 - 🛠️ **Real tools, safely.** The agent can run code, read files, and work in its sandbox. Risky
   tool calls show up as Approve and Deny buttons, and you decide who is allowed to click them.
-- ⚡ **Live progress.** A tool status line updates in place while the agent works, and replies can
-  stream into Discord as they are written.
+- ⚡ **Live progress.** A typing indicator runs while the agent works, replies can stream into
+  Discord as they are written, and `SHOW_TOOL_CALLS=true` shows each tool call in between.
 - 🎙️ **Voice messages.** Send a voice note and the bot transcribes it before the agent reads it,
   with nine providers to choose from, including OpenAI, Groq, Deepgram, and a self-hosted Whisper.
 - 🖼️ **Images and files.** Images go straight to the model. Other files land in the sandbox for the
@@ -138,12 +138,12 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `LETTA_BASE_URL` | unset | Letta API base URL, for self hosted Letta. |
 | `LETTA_COMPUTER` | unset | Custom sandbox target. Unset means an SDK-managed Cloud sandbox per conversation. |
 | `SANDBOX_TTL_MINUTES` | `30` | Idle lifetime of each conversation sandbox. |
-| `PERMISSION_MODE` | `standard` | `strict`, `standard`, `acceptEdits` or `unrestricted`. |
+| `PERMISSION_MODE` | `unrestricted` | `strict`, `standard`, `acceptEdits` or `unrestricted` (bypass permission checks). |
 | `ALLOWED_TOOLS` | empty (CSV) | Tool allowlist. Empty uses the harness default toolset. |
 | `TOOLSET_BASE` | unset | `auto`, `default`, `codex`, `gemini` or `none`. |
 | `CONVERSATION_MODEL` | unset | Model pinned when a conversation is created. |
 | `ROUTES_FILE` | unset | JSON routing table that pins Discord surfaces to existing conversations, see Routing table. |
-| `APPROVAL_MODE` | `admins` | `deny`, `admins`, `requester` or `allow`. |
+| `APPROVAL_MODE` | `allow` | `deny`, `admins`, `requester` or `allow`. |
 | `APPROVAL_TIMEOUT_SECONDS` | `300` | How long an approval stays clickable, then deny. |
 | `TURN_TIMEOUT_SECONDS` | `900` | Longest a whole turn may run, approval waits included. Must exceed `APPROVAL_TIMEOUT_SECONDS`. The SDK's own default is 2 minutes. |
 | `ENABLE_DISCORD_TOOLS` | `true` | Expose the listener-owned Discord tools to the agent. Does not remove `discord_send_message` in tool-mode open channels. |
@@ -160,7 +160,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `REGISTER_SLASH_COMMANDS` | `true` | Register `/new` `/cancel` `/status` `/help` on startup. |
 | `STREAM_EDITS` | `false` | Post the reply once when the turn finishes. Set `true` to stream by editing one message as text arrives. |
 | `STREAM_EDIT_INTERVAL_MS` | `1200` | Minimum gap between streaming edits. |
-| `SHOW_TOOL_STATUS` | `true` | Show a single in-place tool status line. |
+| `SHOW_TOOL_CALLS` | `false` | Post a small line for each tool call, interleaved with the reply text in the order they happened. |
 | `SHOW_REASONING` | `false` | Stream reasoning summaries as a separate message. |
 | `LIFECYCLE_REACTIONS` | `false` | When on, react to the triggering message when a turn succeeds (✅), fails (❌) or is cancelled (⏹️). |
 | `DEBOUNCE_MS` | `1500` | Merge messages arriving in this window into one turn. |
@@ -199,7 +199,7 @@ An open channel shows the agent every message, most of them not meant for it.
 
 - `relay` (default): like everywhere else, every reply the agent writes is posted.
 - `tool`: plain text is not posted. The agent speaks only by calling `discord_send_message`,
-  so it can read along and stay silent. There is no typing indicator, tool status line, or
+  so it can read along and stay silent. There is no typing indicator, tool-call line, or
   lifecycle reaction, and `discord_send_message` never waits for approval. Failed turns
   still post an error. Unposted text is logged, which helps spot a model that forgets the tool.
 
@@ -254,12 +254,12 @@ preview of its input, plus Approve and Deny buttons.
 | `deny` | Everything is auto-denied with a reason. Useful for a read-only agent. |
 | `admins` | Buttons, only ids in `DISCORD_ADMIN_USER_IDS` or `DISCORD_ADMIN_ROLE_IDS` may click. |
 | `requester` | Buttons, the user who triggered the turn or an admin may click. |
-| `allow` | Everything is auto-allowed. Pair with `PERMISSION_MODE=strict`. |
+| `allow` | Everything is auto-allowed. This is the default. |
 
 Anything not decided within `APPROVAL_TIMEOUT_SECONDS` is denied.
 
-The default `admins` mode needs at least one id in `DISCORD_ADMIN_USER_IDS` or
-`DISCORD_ADMIN_ROLE_IDS`. With neither set nobody can click, so every request times out.
+`admins` needs at least one id in `DISCORD_ADMIN_USER_IDS` or `DISCORD_ADMIN_ROLE_IDS`. With
+neither set nobody can click, so every request times out.
 `bun run doctor` and the startup log both warn about this.
 
 ## 🔧 Discord tools
@@ -350,9 +350,10 @@ explains why Modal is a poor fit.
   because all Discord access goes through the listener-owned tools.
 - Everything from Discord reaches the agent wrapped in a `channel-notification` envelope with a
   preamble marking it as untrusted user content, not operator instructions.
-- Keep `PERMISSION_MODE=standard` or stricter and `APPROVAL_MODE` at `admins` or `requester` unless
-  you fully trust every allowed user. `APPROVAL_MODE=allow` plus `PERMISSION_MODE=unrestricted`
-  hands remote shell execution to anyone who can message the bot.
+- The defaults (`APPROVAL_MODE=allow`, `PERMISSION_MODE=unrestricted`) run every tool call without
+  asking, on the sandbox or `LETTA_COMPUTER`. That hands shell execution to anyone who can message
+  the bot. Unless you trust everyone who can reach it, set `PERMISSION_MODE=standard` or stricter and
+  `APPROVAL_MODE` to `admins` or `requester`.
 - Prefer `DM_POLICY=allowlist` or `off`, and set `DISCORD_ALLOWED_USER_IDS` explicitly. The same
   list also restricts who the bot answers in servers, so include everyone who should be able to
   use it there.

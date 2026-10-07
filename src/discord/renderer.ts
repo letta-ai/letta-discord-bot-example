@@ -6,7 +6,8 @@ import { splitForDiscord } from "./split.ts";
 /**
  * Renders the normalized TurnEvent stream of one turn into Discord messages:
  * lifecycle reactions, typing indicator, streamed (or one-shot) reply text,
- * and a single in-place tool status line.
+ * optional tool-call lines interleaved with that text in the order they
+ * happened, and an optional in-place reasoning line.
  */
 
 type MentionType = "users" | "roles" | "everyone";
@@ -52,6 +53,7 @@ export const FAILURE_TEXT =
 
 const NO_MENTIONS = { parse: [] as readonly MentionType[] };
 const REASONING_MAX = 180;
+const TOOL_BLOCK_MAX = 1900;
 
 export class TurnRenderer {
   readonly finished: Promise<void>;
@@ -78,13 +80,16 @@ export class TurnRenderer {
   private lastTextSync = 0;
   private postedAny = false; // any message (text or failure) has replied to the trigger
 
-  // status line
+  // tool calls: consecutive calls share one message; assistant text in
+  // between starts a new one, so the channel reads in event order.
+  private toolBlock: ToolBlock | null = null;
+
+  // reasoning line
   private statusMsg: RenderMessage | null = null;
   private statusContent = "";
   private statusCreating = false;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStatusSync = 0;
-  private toolLine = "";
   private reasoning = "";
   private toolIds = new Set<string>();
 
@@ -122,6 +127,7 @@ export class TurnRenderer {
         }
         if (e.messageId && this.seg.id && e.messageId !== this.seg.id) this.endSegment();
         if (e.messageId && !this.seg.id) this.seg.id = e.messageId;
+        this.toolBlock = null; // tool calls after this text get a new message below it
         this.seg.text += e.text;
         if (this.config.STREAM_EDITS) this.scheduleTextSync();
         return;
@@ -133,15 +139,13 @@ export class TurnRenderer {
       case "tool_call":
         this.toolIds.add(e.toolCallId);
         this.endSegment();
-        if (this.quiet || !this.config.SHOW_TOOL_STATUS) return;
-        this.toolLine = `-# ${e.summary || e.toolName}`;
+        if (this.quiet || !this.config.SHOW_TOOL_CALLS) return;
         this.reasoning = "";
-        this.scheduleStatusSync();
+        this.addToolLine(e.summary || e.toolName);
         return;
       case "retry":
-        if (this.quiet || !this.config.SHOW_TOOL_STATUS) return;
-        this.toolLine = `-# Retrying (attempt ${e.attempt}/${e.maxAttempts})`;
-        this.scheduleStatusSync();
+        if (this.quiet || !this.config.SHOW_TOOL_CALLS) return;
+        this.addToolLine(`Retrying (attempt ${e.attempt}/${e.maxAttempts})`);
         return;
       case "merged":
         this.ended = true;
@@ -273,16 +277,40 @@ export class TurnRenderer {
     return this.channel.send({ content, allowedMentions: NO_MENTIONS });
   }
 
-  // ---- status line --------------------------------------------------------
+  // ---- tool calls ---------------------------------------------------------
+
+  private addToolLine(label: string): void {
+    const line = `-# ${truncate(label.replace(/\s+/g, " ").trim(), 300)}`;
+    let block = this.toolBlock;
+    if (!block || block.lines.join("\n").length + line.length + 1 > TOOL_BLOCK_MAX) {
+      block = this.toolBlock = { msg: null, content: "", lines: [], queued: false };
+    }
+    block.lines.push(line);
+    if (block.queued) return; // the queued sync renders every line added before it runs
+    block.queued = true;
+    const b = block;
+    this.enqueue(() => this.syncToolBlock(b));
+  }
+
+  /** Post or edit a tool block. Not a reply and leaves typing on: the agent is still working. */
+  private async syncToolBlock(block: ToolBlock): Promise<void> {
+    block.queued = false;
+    const content = block.lines.join("\n");
+    if (!block.msg) {
+      block.msg = await this.channel.send({ content, allowedMentions: NO_MENTIONS });
+      block.content = content;
+    } else if (content !== block.content) {
+      await block.msg.edit({ content, allowedMentions: NO_MENTIONS });
+      block.content = content;
+    }
+  }
+
+  // ---- reasoning line -----------------------------------------------------
 
   private renderStatus(): string {
-    const lines: string[] = [];
-    if (this.toolLine) lines.push(truncate(this.toolLine, 300));
-    if (this.config.SHOW_REASONING) {
-      const r = this.reasoning.replace(/\s+/g, " ").trim();
-      if (r) lines.push(`-# 💭 ${r.length > REASONING_MAX ? `...${r.slice(-REASONING_MAX)}` : r}`);
-    }
-    return lines.join("\n");
+    if (!this.config.SHOW_REASONING) return "";
+    const r = this.reasoning.replace(/\s+/g, " ").trim();
+    return r ? `-# 💭 ${r.length > REASONING_MAX ? `...${r.slice(-REASONING_MAX)}` : r}` : "";
   }
 
   private scheduleStatusSync(): void {
@@ -354,6 +382,13 @@ export class TurnRenderer {
 
     this.enqueue(async () => this.resolveFinished());
   }
+}
+
+interface ToolBlock {
+  msg: RenderMessage | null;
+  content: string;
+  lines: string[];
+  queued: boolean;
 }
 
 interface Segment {

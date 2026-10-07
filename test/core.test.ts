@@ -155,8 +155,9 @@ describe("config", () => {
     expect(c.STREAM_EDITS).toBe(false);
     expect(c.DEBOUNCE_MS).toBe(0);
     expect(c.AUTO_THREAD).toBe(true);
-    expect(c.APPROVAL_MODE).toBe("admins");
-    expect(c.PERMISSION_MODE).toBe("standard");
+    expect(c.APPROVAL_MODE).toBe("allow");
+    expect(c.PERMISSION_MODE).toBe("unrestricted");
+    expect(c.SHOW_TOOL_CALLS).toBe(false);
     expect(c.DM_POLICY).toBe("allowlist");
   });
   test("lifecycle reactions are off by default and can be enabled", () => {

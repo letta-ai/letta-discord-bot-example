@@ -37,12 +37,12 @@ export const ConfigSchema = z.object({
   SANDBOX_TTL_MINUTES: int(30),
 
   // Agent policy (operator-owned, never changeable from Discord)
-  PERMISSION_MODE: z.enum(["strict", "standard", "acceptEdits", "unrestricted"]).default("standard"),
+  PERMISSION_MODE: z.enum(["strict", "standard", "acceptEdits", "unrestricted"]).default("unrestricted"),
   ALLOWED_TOOLS: csv, // empty = harness default toolset
   TOOLSET_BASE: z.enum(["auto", "default", "codex", "gemini", "none"]).optional(),
   CONVERSATION_MODEL: z.string().optional(), // pinned at conversation create
   ROUTES_FILE: z.string().optional(), // JSON routing table pinning Discord surfaces to existing conversations
-  APPROVAL_MODE: z.enum(["deny", "admins", "requester", "allow"]).default("admins"),
+  APPROVAL_MODE: z.enum(["deny", "admins", "requester", "allow"]).default("allow"),
   APPROVAL_TIMEOUT_SECONDS: int(300),
   TURN_TIMEOUT_SECONDS: int(900), // whole turn, including approval waits
   ENABLE_DISCORD_TOOLS: bool(true),
@@ -64,7 +64,7 @@ export const ConfigSchema = z.object({
   // UX
   STREAM_EDITS: bool(false),
   STREAM_EDIT_INTERVAL_MS: int(1200),
-  SHOW_TOOL_STATUS: bool(true),
+  SHOW_TOOL_CALLS: bool(false), // post tool-call lines between replies
   SHOW_REASONING: bool(false),
   LIFECYCLE_REACTIONS: bool(false),
   DEBOUNCE_MS: int(1500),

@@ -8,7 +8,7 @@ own SDK-managed Cloud sandbox. The listener owns the Discord token; sandboxes ne
 discord.js Gateway
   -> discord/ingress.ts    gate, dedupe, debounce, auto-thread, attachments -> InboundMessage[]
   -> letta/bridge.ts       AgentBridge.submit(): per-route FIFO, session pool, envelope, SDK stream -> TurnEvent
-  -> discord/renderer.ts   streaming edits, tool status line, 2000-char code-fence-aware split, final reactions
+  -> discord/renderer.ts   streaming edits, interleaved tool-call lines, 2000-char code-fence-aware split, final reactions
   <- discord/approvals.ts  canUseTool -> Approve/Deny buttons (APPROVAL_MODE)
   <- discord/tools.ts      listener-owned client tools executed in this process
 ```
@@ -84,7 +84,9 @@ Rendering
 - Typing indicator refreshed every 8s until the first visible text or done.
 - `STREAM_EDITS`: post one message on first text, edit at most every `STREAM_EDIT_INTERVAL_MS`; when it exceeds the
   limit, finalize and continue in a new message. Otherwise post the full reply once on done.
-- `SHOW_TOOL_STATUS`: a single status line (`-# 🔧 Bash: npm test`) edited in place, removed or collapsed on done.
+- `SHOW_TOOL_CALLS` (off by default): each tool call ends the current text segment and posts a `-#` line
+  after it. Consecutive calls share one message; the next assistant text starts below it, so the channel
+  reads in event order. The lines stay after the turn.
 - Failure: short user-facing line, never raw internal errors or ids.
 
 Approvals (`APPROVAL_MODE`)

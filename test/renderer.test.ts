@@ -12,7 +12,7 @@ function config(overrides: Partial<Config> = {}): Config {
   return {
     STREAM_EDITS: true,
     STREAM_EDIT_INTERVAL_MS: 1,
-    SHOW_TOOL_STATUS: true,
+    SHOW_TOOL_CALLS: true,
     SHOW_REASONING: false,
     LIFECYCLE_REACTIONS: true,
     ...overrides,
@@ -225,21 +225,43 @@ describe("TurnRenderer", () => {
     expect(trigger.reacted).toEqual(["❌"]);
   });
 
-  test("updates and removes one tool status message", async () => {
+  test("interleaves tool calls with assistant messages in event order", async () => {
     const channel = new FakeChannel(true);
     const trigger = new FakeMessage();
     const renderer = new TurnRenderer({ config: config(), channel, triggerMessage: trigger });
 
-    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "bun test" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Let me look.", messageId: "a1" });
+    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Grep", summary: "Search memory" });
+    renderer.onEvent({ kind: "tool_call", toolCallId: "2", toolName: "Read", summary: "Read notes.md" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Found it.", messageId: "a2" });
+    renderer.onEvent({ kind: "tool_call", toolCallId: "3", toolName: "Bash", summary: "bun test" });
     renderer.onEvent({ kind: "retry", attempt: 2, maxAttempts: 3 });
-    renderer.onEvent({ kind: "assistant_delta", text: "done" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Done.", messageId: "a3" });
     renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
     await renderer.finished;
 
-    expect(channel.sent.length).toBe(2);
-    expect(channel.sent.some((m) => m.content === "done")).toBe(true);
-    const status = channel.sent.find((m) => m.content !== "done")!;
-    expect(status.deleted).toBe(true);
+    expect(channel.sent.map((m) => m.content)).toEqual([
+      "Let me look.",
+      "-# Search memory\n-# Read notes.md", // consecutive calls share a message
+      "Found it.",
+      "-# bun test\n-# Retrying (attempt 2/3)",
+      "Done.",
+    ]);
+    expect(channel.sent.some((m) => m.deleted)).toBe(false); // the record stays
+  });
+
+  test("tool calls are hidden unless SHOW_TOOL_CALLS is on", async () => {
+    const channel = new FakeChannel(true);
+    const trigger = new FakeMessage();
+    const renderer = new TurnRenderer({ config: config({ SHOW_TOOL_CALLS: false }), channel, triggerMessage: trigger });
+
+    renderer.onEvent({ kind: "assistant_delta", text: "One.", messageId: "a1" });
+    renderer.onEvent({ kind: "tool_call", toolCallId: "1", toolName: "Bash", summary: "bun test" });
+    renderer.onEvent({ kind: "assistant_delta", text: "Two.", messageId: "a2" });
+    renderer.onEvent({ kind: "done", success: true, durationMs: 1 });
+    await renderer.finished;
+
+    expect(channel.sent.map((m) => m.content)).toEqual(["One.", "Two."]);
   });
 
   test("tool status shows only the label, no wrench or tool name", async () => {

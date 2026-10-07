@@ -416,7 +416,7 @@ describe("clientOptions", () => {
     expect(clientOptions(loadConfig({ ...base, LETTA_COMPUTER: "box" }))).toMatchObject({ computer: "box", requestTimeoutMs: 900_000 });
   });
   test("rejects a turn timeout shorter than the approval timeout", () => {
-    expect(() => loadConfig({ ...base, TURN_TIMEOUT_SECONDS: "120", APPROVAL_TIMEOUT_SECONDS: "300" })).toThrow(/TURN_TIMEOUT_SECONDS/);
+    expect(() => loadConfig({ ...base, APPROVAL_MODE: "admins", TURN_TIMEOUT_SECONDS: "120", APPROVAL_TIMEOUT_SECONDS: "300" })).toThrow(/TURN_TIMEOUT_SECONDS/);
   });
 });
 

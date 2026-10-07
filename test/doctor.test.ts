@@ -39,7 +39,7 @@ describe("doctor Message Content intent", () => {
 
 describe("doctor approvers", () => {
   test("warns when APPROVAL_MODE=admins has nobody who can approve", () => {
-    const check = checkApprovers(config());
+    const check = checkApprovers(config({ APPROVAL_MODE: "admins" }));
     expect(check.status).toBe("WARN");
     expect(check.hint).toContain("DISCORD_ADMIN_USER_IDS");
   });

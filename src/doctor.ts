@@ -508,6 +508,14 @@ export function checkApprovers(config: Config): CheckResult {
       "Set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS, or choose another APPROVAL_MODE.",
     );
   }
+  if (config.APPROVAL_MODE === "allow") {
+    return result(
+      "PASS",
+      "Approvals",
+      `APPROVAL_MODE=allow, PERMISSION_MODE=${config.PERMISSION_MODE}: tool calls run without asking`,
+      "Use APPROVAL_MODE=admins or requester if untrusted users can reach the bot.",
+    );
+  }
   return result("PASS", "Approvals", `APPROVAL_MODE=${config.APPROVAL_MODE}`, "No action needed.");
 }
 
