@@ -105,6 +105,12 @@ Fill in `DISCORD_BOT_TOKEN`, `LETTA_API_KEY`, and `LETTA_AGENT_ID`. Never commit
 > reach the bot and configure a stricter permission and approval policy before exposing it to
 > untrusted users.
 
+> [!IMPORTANT]
+> **Managed sandboxes and API keys:** with `LETTA_COMPUTER` unset, tools run in an SDK-managed
+> Cloud sandbox. Some API keys currently get `401 Unauthorized` when the SDK refreshes that sandbox
+> ([LET-13714](https://linear.app/letta/issue/LET-13714)), so every turn fails. If yours does, run
+> tools on a [connected computer](docs/deploying.md#execution-backends) with `LETTA_COMPUTER`.
+
 See [Tools and permissions](docs/tools-and-permissions.md) when you need to remove a tool or narrow
 what the agent can execute.
 
@@ -375,8 +381,9 @@ explains why Modal is a poor fit.
   preamble marking it as untrusted user content, not operator instructions.
 - The defaults (`APPROVAL_MODE=allow`, `PERMISSION_MODE=unrestricted`) run every tool call without
   asking, on the sandbox or `LETTA_COMPUTER`. That hands shell execution to anyone who can message
-  the bot. Unless you trust everyone who can reach it, set `PERMISSION_MODE=standard` or stricter and
-  `APPROVAL_MODE` to `admins` or `requester`.
+  the bot. Unless you trust everyone who can reach it, remove the tools they should not have
+  (`ALLOWED_TOOLS`, or a per-surface routing-table `policy`) and set `APPROVAL_MODE` to `admins` or
+  `requester`. See [Tools and permissions](docs/tools-and-permissions.md).
 - Prefer `DM_POLICY=allowlist` or `off`, and set `DISCORD_ALLOWED_USER_IDS` explicitly. The same
   list also restricts who the bot answers in servers, so include everyone who should be able to
   use it there.
