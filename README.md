@@ -18,11 +18,6 @@
 |
 </div>
 
-> [!NOTE]
-> This is a rewrite on the [Letta Agent SDK](https://docs.letta.com/). The previous Express bot,
-> with message batching, timer heartbeats, and per-user memory blocks, is preserved unchanged on the
-> [`legacy`](https://github.com/letta-ai/letta-discord-bot-example/tree/legacy) branch.
-
 ## ✨ Features
 
 - 🧠 **An agent that remembers.** The bot is a stateful Letta agent, not a stateless chat
