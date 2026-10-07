@@ -7,7 +7,7 @@ This is a self-hosted Discord adapter for one Letta agent. It uses the Letta Age
 - `src/index.ts`: load config and routes, wire Discord to the bridge, start health checks, and shut down.
 - `src/config.ts`: validate environment configuration and choose the reply mode for a route.
 - `src/types.ts`: contract between the platform adapter and the Letta core.
-- `src/routing.ts`: validate the optional routing table and resolve routes to conversations.
+- `src/routing.ts`: validate the optional routing table and resolve each route to a conversation and a tool policy.
 - `src/log.ts`: structured JSON logging.
 - `src/health.ts`: Bun server for `/` and `/healthz`.
 - `src/doctor.ts`: preflight checks for config, Discord, Letta, routes, transcription, and storage.
