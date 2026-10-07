@@ -158,7 +158,20 @@ export class TurnRenderer {
         this.endSegment();
         if (this.quiet || !this.config.SHOW_TOOL_CALLS) return;
         this.reasoning = "";
-        this.addToolEntry(e.toolCallId, { label: e.summary || e.toolName, start: this.now() });
+        {
+          // The SDK emits tool_call once per streamed chunk with the same id;
+          // early chunks carry partial arguments. Update the line, never append.
+          const label = e.summary || e.toolName;
+          const hit = this.toolEntries.get(e.toolCallId);
+          if (hit) {
+            if (label !== e.toolName || hit.entry.label === e.toolName) {
+              hit.entry.label = cleanLabel(label);
+              this.queueToolSync(hit.block);
+            }
+            return;
+          }
+          this.addToolEntry(e.toolCallId, { label, start: this.now() });
+        }
         return;
       case "tool_result": {
         const hit = this.toolEntries.get(e.toolCallId);
@@ -305,7 +318,7 @@ export class TurnRenderer {
   // ---- tool calls ---------------------------------------------------------
 
   private addToolEntry(toolCallId: string | null, entry: ToolEntry): void {
-    entry.label = truncate(entry.label.replace(/\s+/g, " ").trim(), 200);
+    entry.label = cleanLabel(entry.label);
     let block = this.toolBlock;
     if (!block || block.entries.length >= TOOL_CARD_MAX_LINES) {
       block = this.toolBlock = { msg: null, sent: "", entries: [], queued: false, plain: false };
@@ -457,6 +470,10 @@ interface ToolBlock {
   plain: boolean; // Discord rejected the card; render `-#` lines instead
 }
 
+function cleanLabel(label: string): string {
+  return truncate(label.replace(/\s+/g, " ").trim(), 200);
+}
+
 function toolLine(e: ToolEntry): string {
   if (e.retry) return `↻ ${e.label}`;
   if (e.end === undefined) return `${e.stopped ? "■" : "◌"} ${e.label}`;
@@ -476,7 +493,8 @@ function toolCard(block: ToolBlock): CardPayload {
       {
         type: CONTAINER,
         accent_color: accent,
-        components: [{ type: TEXT_DISPLAY, content: entries.map(toolLine).join("\n") }],
+        // Subtext keeps the card quiet next to the reply text.
+        components: [{ type: TEXT_DISPLAY, content: entries.map((e) => `-# ${toolLine(e)}`).join("\n") }],
       },
     ],
     allowedMentions: NO_MENTIONS,

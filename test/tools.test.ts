@@ -136,6 +136,22 @@ describe("Discord tools", () => {
     expect((h.sent[0]!.files as { name: string }[])[0]!.name).toBe("report.txt");
   });
 
+  test("every Discord tool requires a description of the call", () => {
+    const h = harness();
+    const sandbox = { async downloadFile() { return new Uint8Array(); } };
+    const tools = createDiscordToolFactory({ client: h.client, config: { ...config, REPLY_MODE: "tool" } as Config })(
+      route,
+      turn,
+      sandbox as never,
+    );
+    expect(tools.map((t) => t.name).sort()).toEqual(["discord_react", "discord_read_history", "discord_send_file", "discord_send_message"]);
+    for (const tool of tools) {
+      const params = tool.parameters as { required?: string[]; properties: Record<string, { type: string }> };
+      expect(params.required).toContain("description");
+      expect(params.properties.description!.type).toBe("string");
+    }
+  });
+
   test("returns model-visible errors instead of throwing", async () => {
     const client = { channels: { fetch: async () => null } };
     const tool = createDiscordToolFactory({ client, config })(route, turn, null).find(

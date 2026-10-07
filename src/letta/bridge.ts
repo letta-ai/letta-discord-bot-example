@@ -76,7 +76,9 @@ interface LaneState {
  */
 export function toolLabel(name: string, input: Record<string, unknown>): string {
   const pick = (k: string) => (typeof input[k] === "string" && (input[k] as string).trim() ? (input[k] as string) : undefined);
-  const arg = pick("command") ?? pick("file_path") ?? pick("path") ?? pick("pattern") ?? pick("query") ?? pick("url");
+  // Paths show as their file name: full paths are long and mostly noise in Discord.
+  const file = pick("file_path") ?? pick("path");
+  const arg = pick("command") ?? (file ? (file.replace(/\/+$/, "").split("/").pop() || file) : undefined) ?? pick("pattern") ?? pick("query") ?? pick("url");
   const raw = pick("description") ?? (arg ? `${name} ${arg}` : name);
   const oneLine = raw.replace(/\s+/g, " ").trim();
   return oneLine.length > 100 ? `${oneLine.slice(0, 97)}...` : oneLine;

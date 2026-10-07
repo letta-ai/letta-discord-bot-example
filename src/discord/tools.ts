@@ -90,6 +90,16 @@ export const SEND_MESSAGE_DESCRIPTION =
  * discord_send_message. Tool routes always get it, even with
  * ENABLE_DISCORD_TOOLS=false, because it is their only way to speak.
  */
+/**
+ * Every listener-owned tool requires a short description of the call, the same
+ * contract as the harness Bash tool. It labels the call in the tool card and
+ * is ignored by execute.
+ */
+export const DESCRIPTION_PARAM = {
+  type: "string",
+  description: "Clear, concise description of what this call does, in active voice (5-10 words). Shown to people in Discord.",
+} as const;
+
 export function createDiscordToolFactory(deps: { client: DiscordClientLike; config: Config }): ToolFactory {
   return (route, currentTurn, sandbox): AnyAgentTool[] => {
     // Routes pinned to one conversation share a session, so act on the route of
@@ -106,8 +116,8 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
         description: "Add a reaction to a message in this Discord conversation.",
         parameters: {
           type: "object",
-          properties: { emoji: { type: "string" }, message_id: { type: "string" } },
-          required: ["emoji"],
+          properties: { description: DESCRIPTION_PARAM, emoji: { type: "string" }, message_id: { type: "string" } },
+          required: ["description", "emoji"],
           additionalProperties: false,
         },
         async execute(_toolCallId, rawArgs) {
@@ -133,9 +143,11 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
         parameters: {
           type: "object",
           properties: {
+            description: DESCRIPTION_PARAM,
             limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
             before_message_id: { type: "string" },
           },
+          required: ["description"],
           additionalProperties: false,
         },
         async execute(_toolCallId, rawArgs) {
@@ -160,8 +172,8 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
         description: SEND_MESSAGE_DESCRIPTION,
         parameters: {
           type: "object",
-          properties: { content: { type: "string" }, reply_to_message_id: { type: "string" } },
-          required: ["content"],
+          properties: { description: DESCRIPTION_PARAM, content: { type: "string" }, reply_to_message_id: { type: "string" } },
+          required: ["description", "content"],
           additionalProperties: false,
         },
         async execute(_toolCallId, rawArgs) {
@@ -194,8 +206,8 @@ export function createDiscordToolFactory(deps: { client: DiscordClientLike; conf
         description: "Upload a file to this Discord conversation. Save or copy the file into /root/downloads first, then provide its absolute path.",
         parameters: {
           type: "object",
-          properties: { path: { type: "string" }, content: { type: "string" } },
-          required: ["path"],
+          properties: { description: DESCRIPTION_PARAM, path: { type: "string" }, content: { type: "string" } },
+          required: ["description", "path"],
           additionalProperties: false,
         },
         async execute(_toolCallId, rawArgs) {

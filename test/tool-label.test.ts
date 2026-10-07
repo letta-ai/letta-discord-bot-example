@@ -8,7 +8,11 @@ describe("toolLabel", () => {
     );
   });
   test("falls back to name plus primary argument", () => {
-    expect(toolLabel("Read", { file_path: "/root/README.md" })).toBe("Read /root/README.md");
+    expect(toolLabel("Bash", { command: "bun test" })).toBe("Bash bun test");
+  });
+  test("shows paths as their file name", () => {
+    expect(toolLabel("Read", { file_path: "/Users/cameron/.letta/agents/agent-1/memory/human.md" })).toBe("Read human.md");
+    expect(toolLabel("Glob", { path: "/root/src/" })).toBe("Glob src");
   });
   test("falls back to the bare tool name", () => {
     expect(toolLabel("memory", {})).toBe("memory");
