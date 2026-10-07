@@ -205,6 +205,13 @@ An open channel shows the agent every message, most of them not meant for it.
 
 Mentions in other channels, bot threads, and DMs always relay.
 
+Relay is a live feed of the conversation: everything the agent says in it is posted, including
+replies it sends on its own later, such as when a background task finishes. It works best when each
+Discord thread or channel has its own conversation, which is the default. A conversation the agent
+also uses elsewhere (a pinned route, or `default`) will post that activity here too. Output from
+background subagents is not posted; the agent reports on it itself. In `tool` mode nothing is
+posted unless the agent calls `discord_send_message`.
+
 On the first message for a route the listener creates a Letta conversation, records
 `route -> conversationId` in `bun:sqlite` under `DATA_DIR`, and resumes a session for it. That
 conversation owns one Cloud sandbox. Only one turn per route runs at a time; messages that arrive
