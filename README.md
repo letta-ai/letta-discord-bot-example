@@ -28,11 +28,11 @@
 - 🧠 **An agent that remembers.** The bot is a stateful Letta agent, not a stateless chat
   completion. It carries memory across every conversation, so it gets to know your server and
   the people in it.
-- 🧵 **A conversation per thread.** Mention the bot and it opens a thread. Every thread and DM
-  becomes its own Letta conversation with its own Cloud sandbox, so parallel chats never bleed
-  into each other.
-- 🛠️ **Real tools, safely.** The agent can run code, read files, and work in its sandbox. Risky
-  tool calls show up as Approve and Deny buttons, and you decide who is allowed to click them.
+- 🧵 **A conversation per thread.** Mention the bot and it opens a thread. By default, every thread
+  and DM gets its own Letta conversation and SDK-managed Cloud sandbox, so parallel chats stay
+  separate. Routes can also be pinned to existing conversations.
+- 🛠️ **Real tools with operator controls.** The agent can run code, read files, and work in its
+  sandbox. You can require Approve and Deny buttons and choose who may use them.
 - ⚡ **Live progress.** A typing indicator runs while the agent works, replies can stream into
   Discord as they are written, and `SHOW_TOOL_CALLS=true` shows each tool call in between.
 - 🎙️ **Voice messages.** Send a voice note and the bot transcribes it before the agent reads it,
@@ -48,7 +48,7 @@
 
 - [Letta Agent SDK](https://docs.letta.com/)
 
-  - Runs the agent. It creates a conversation and a Cloud sandbox per Discord thread, streams
+  - Runs the agent. It creates or resumes conversations, manages the execution backend, streams
     replies, and handles tool approvals.
 
 - [discord.js](https://discord.js.org/)
@@ -83,8 +83,8 @@
 3. Copy the bot token from the same page (**Reset Token** if you never copied it).
 4. On **OAuth2 > URL Generator**, pick the `bot` and `applications.commands` scopes, then enable
    exactly these permissions:
-   `Send Messages`, `Send Messages in Threads`, `Create Public Threads`, `Read Message History`,
-   `Add Reactions`, `Attach Files`, `Embed Links`.
+   `View Channel`, `Send Messages`, `Send Messages in Threads`, `Create Public Threads`,
+   `Read Message History`, `Add Reactions`, `Attach Files`, `Embed Links`.
    Open the generated URL and install the bot into your server.
 
 ### 🤖 Connect your Letta agent
@@ -97,7 +97,16 @@ cd letta-discord-bot-example
 cp .env.example .env
 ```
 
-Fill in at least `DISCORD_BOT_TOKEN`, `LETTA_API_KEY`, and `LETTA_AGENT_ID`. Never commit `.env`.
+Fill in `DISCORD_BOT_TOKEN`, `LETTA_API_KEY`, and `LETTA_AGENT_ID`. Never commit `.env`.
+
+> [!WARNING]
+> **Security defaults:** `APPROVAL_MODE=allow` and `PERMISSION_MODE=unrestricted` run every tool
+> call without asking. Anyone who can message the bot can direct shell execution. Restrict who can
+> reach the bot and configure a stricter permission and approval policy before exposing it to
+> untrusted users.
+
+See [Tools and permissions](docs/tools-and-permissions.md) when you need to remove a tool or narrow
+what the agent can execute.
 
 ### 🩺 Check your setup
 
@@ -106,9 +115,8 @@ npm ci
 bun run doctor
 ```
 
-The doctor validates your configuration, Discord access and permissions, the Letta agent and
-computer, transcription credentials, and `DATA_DIR` write access. It never connects to the
-Discord Gateway or posts messages.
+The doctor validates configuration, Discord access, the Letta agent, the execution target, routing,
+transcription, and `DATA_DIR`. It does not connect to the Discord Gateway or post messages.
 
 ### 🚀 Run it
 
@@ -137,7 +145,7 @@ stay unset, since an empty string fails validation and the process refuses to st
 | `LETTA_AGENT_ID` | required | Target agent id, must start with `agent-`. |
 | `LETTA_BASE_URL` | unset | Letta API base URL, for self hosted Letta. |
 | `LETTA_COMPUTER` | unset | Custom sandbox target. Unset means an SDK-managed Cloud sandbox per conversation. |
-| `SANDBOX_TTL_MINUTES` | `30` | Idle lifetime of each conversation sandbox. |
+| `SANDBOX_TTL_MINUTES` | `30` | Idle lifetime of each managed conversation sandbox, clamped to 1-60 minutes. |
 | `PERMISSION_MODE` | `unrestricted` | `strict`, `standard`, `acceptEdits` or `unrestricted` (bypass permission checks). |
 | `ALLOWED_TOOLS` | empty (CSV) | Tool allowlist. Empty uses the harness default toolset. |
 | `TOOLSET_BASE` | unset | `auto`, `default`, `codex`, `gemini` or `none`. |
@@ -212,11 +220,12 @@ also uses elsewhere (a pinned route, or `default`) will post that activity here 
 background subagents is not posted; the agent reports on it itself. In `tool` mode nothing is
 posted unless the agent calls `discord_send_message`.
 
-On the first message for a route the listener creates a Letta conversation, records
-`route -> conversationId` in `bun:sqlite` under `DATA_DIR`, and resumes a session for it. That
-conversation owns one Cloud sandbox. Only one turn per route runs at a time; messages that arrive
-mid-turn are queued and merged into the next turn. `/new` drops the mapping so the next message
-starts a fresh conversation (the old one stays in Letta).
+On the first message for an automatic route, the listener creates a Letta conversation, records
+`route -> conversationId` in `bun:sqlite` under `DATA_DIR`, and resumes a session for it. By default,
+that conversation gets an SDK-managed Cloud sandbox. With `LETTA_COMPUTER`, its tools run on the
+connected computer instead. Only one turn per lane runs at a time; messages that arrive mid-turn
+are queued and merged into the next turn. `/new` drops an automatic mapping so the next message
+starts a fresh conversation. The old conversation stays in Letta.
 
 ### Routing table
 
@@ -280,6 +289,9 @@ in the sandbox:
 | `discord_read_history` | Read recent messages from the route. |
 | `discord_send_file` | Send a file from the sandbox to the route. |
 | `discord_send_message` | Post a message. Only in open channels with `OPEN_CHANNEL_REPLY_MODE=tool`, where it is the only way to speak. |
+
+To remove a tool or change which tools can run on a route, see
+[Tools and permissions](docs/tools-and-permissions.md).
 
 ## 💬 Slash commands
 
@@ -364,15 +376,22 @@ explains why Modal is a poor fit.
 - Prefer `DM_POLICY=allowlist` or `off`, and set `DISCORD_ALLOWED_USER_IDS` explicitly. The same
   list also restricts who the bot answers in servers, so include everyone who should be able to
   use it there.
-- Only invite the bot to the guilds it needs and grant only the seven permissions listed above.
+- Only invite the bot to the guilds it needs and grant only the eight permissions listed above.
 - `.env` is gitignored. Pass secrets through your platform secret store, never a Dockerfile, a
   committed config, or a slash command.
 - The `/app/data` volume contains route ids and conversation ids. Treat it as sensitive and keep it
   on private storage.
 
+## 🌐 Other platforms
+
+The SDK bridge is separate from the Discord adapter. See [Putting a Letta agent on another
+platform](docs/porting.md) for the reusable core, adapter contract, and a concrete Telegram mapping.
+
 ## 🗂️ Layout
 
-See `ARCHITECTURE.md` for module ownership and the full behavior spec.
+Start with [AGENTS.md](AGENTS.md) for the file map and contributor invariants. Read
+[ARCHITECTURE.md](ARCHITECTURE.md) for the current runtime design and [docs/porting.md](docs/porting.md)
+for the platform boundary.
 
 ## 📄 License
 

@@ -87,6 +87,35 @@ docker run -d --name listener --restart unless-stopped --stop-timeout 30 \
 The image installs dependencies with `npm ci`, runs as the unprivileged `bun` user, and has a
 `HEALTHCHECK` on `/healthz` that `docker ps` reports.
 
+### Routing tables in containers
+
+The image copies only `src/`, `package.json`, and `tsconfig.json` into `/app`. Setting
+`ROUTES_FILE=./routes.json` does not make a host file appear in the container. Mount the file and
+set its in-container path. For Compose, add this to the service:
+
+```yaml
+environment:
+  ROUTES_FILE: /app/config/routes.json
+volumes:
+  - ./routes.json:/app/config/routes.json:ro
+```
+
+The equivalent `docker run` arguments are:
+
+```bash
+-e ROUTES_FILE=/app/config/routes.json \
+-v "$PWD/routes.json:/app/config/routes.json:ro"
+```
+
+You can instead bake a table into a custom image with `COPY routes.json /app/config/routes.json`.
+The repository `.dockerignore` does not exclude JSON files, so a file inside the build context is
+available to that instruction. Do not put secrets in the routing table.
+
+On Fly.io, either bake the table with a Dockerfile `COPY` or place it on a mounted volume and set
+`ROUTES_FILE` to that volume path. On Railway and Render, bake it into the image or mount it from
+persistent storage. In every case, run `bun run doctor` with the same path before relying on the
+routing rules.
+
 ## Fly.io
 
 ```bash
@@ -149,7 +178,9 @@ fights the platform's restart and concurrency model. Use a VM, Fly.io, Railway, 
 
 ## Execution backends
 
-Where the bot runs is separate from where the agent's tools run. By default the SDK runs tools
-in Letta-managed Cloud sandboxes. Set `LETTA_COMPUTER` to route tools to a computer you have
-connected, which doctor verifies is online. Per-conversation Cloud sandboxes currently fail with
-API-key auth until LET-13714 is fixed.
+Where the bot runs is separate from where the agent's tools run. When `LETTA_COMPUTER` is unset,
+the SDK creates a managed Cloud sandbox for each conversation. Set `LETTA_COMPUTER` to route tools
+to a connected computer, which doctor verifies is online. Known issue
+[LET-13714](https://linear.app/letta/issue/LET-13714) reports `401` responses from
+`/v1/sandboxes/:id/refresh` for non-admin API keys with Agent SDK managed sandboxes. Its status is
+Triage as of 2026-10-07.
