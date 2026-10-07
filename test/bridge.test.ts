@@ -31,7 +31,7 @@ function inbound(id: string, text: string, files: InboundMessage["files"] = [], 
   };
 }
 
-type Script = (sent: unknown, n: number) => SDKMessage[] | Error;
+type Script = (sent: unknown, n: number, otid?: string) => SDKMessage[] | Error;
 
 function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean; readyGate?: Promise<void> } = {}) {
   const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any, resumedIds: [] as string[] };
@@ -67,9 +67,9 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
           }
           return { model: "test/model" };
         },
-        async send(m: unknown) {
+        async send(m: unknown, o?: { otid?: string }) {
           calls.sends.push(m);
-          const r = script(m, calls.sends.length);
+          const r = script(m, calls.sends.length, o?.otid);
           if (r instanceof Error) throw r;
           queue = r;
         },
@@ -547,5 +547,54 @@ describe("routing table lanes", () => {
 
     expect(calls.resumes).toBe(2);
     expect(built).toEqual([["discord_send_message"], []]);
+  });
+});
+
+describe("run tracking", () => {
+  const echo = (otid: string | undefined, run: string) =>
+    ({ type: "stream_event", event: { message_type: "user_message", otid, run_id: run } }) as unknown as SDKMessage;
+  const say = (runId: string, content: string) => ({ type: "assistant", content, runId }) as unknown as SDKMessage;
+  const status = (s: string, runs: string[] = []) => ({ type: "loop_status", status: s, activeRunIds: runs }) as unknown as SDKMessage;
+  const result = (runIds: string[]) => ({ type: "result", success: true, durationMs: 5, runIds }) as unknown as SDKMessage;
+  const texts = (events: TurnEvent[]) => events.flatMap((e) => (e.kind === "assistant_delta" ? [e.text] : []));
+
+  test("a task-notification turn ahead of ours is not posted, and our reply is", async () => {
+    const store = new RouteStore(":memory:");
+    // Mirrors the 2026-10-07 overlap capture: the notification's run and result
+    // arrive first, then our run, which ends with no result of its own.
+    const { client } = fakeClient((_m, _n, otid) => [
+      echo("note-1", "tn"),
+      status("PROCESSING_API_RESPONSE", ["tn"]),
+      say("tn", "The password search finished."),
+      result(["tn"]),
+      echo(otid, "b"),
+      status("PROCESSING_API_RESPONSE", ["b"]),
+      say("b", "Yes, I see it."),
+      status("WAITING_ON_INPUT"),
+    ]);
+    const bridge = createAgentBridge(config, { client, store });
+    const a = ctxCollector("m1");
+    await bridge.submit([inbound("m1", "Do you see what I am replying to")], a.ctx);
+    expect(texts(a.events)).toEqual(["Yes, I see it."]);
+    const done = a.events.filter((e) => e.kind === "done");
+    expect(done).toHaveLength(1);
+    expect(done[0]).toMatchObject({ success: true });
+  });
+
+  test("background subagent output in our turn is dropped", async () => {
+    const store = new RouteStore(":memory:");
+    const { client } = fakeClient((_m, _n, otid) => [
+      echo(otid, "a"),
+      say("a", "Searching."),
+      say("subagent-run", "**Direct answer.** Yes."),
+      status("PROCESSING_API_RESPONSE", ["a2"]),
+      say("a2", "Done."),
+      // The SDK lists every run that streamed during its turn, subagents included.
+      result(["a", "subagent-run", "a2"]),
+    ]);
+    const bridge = createAgentBridge(config, { client, store });
+    const a = ctxCollector("m1");
+    await bridge.submit([inbound("m1", "?")], a.ctx);
+    expect(texts(a.events)).toEqual(["Searching.", "Done."]);
   });
 });
