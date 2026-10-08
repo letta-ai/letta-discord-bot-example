@@ -157,7 +157,10 @@ export async function startDiscord(
     if (message.partial) {
       try {
         await message.fetch();
-      } catch {
+      } catch (err) {
+        // Not handled, so a redelivery of the same event must not be ignored.
+        dedupe.forget(message.id);
+        log.debug("could not fetch partial message", { id: message.id, err: String(err) });
         return;
       }
     }
@@ -173,6 +176,10 @@ export async function startDiscord(
       log.debug("ignored message", { id: message.id, reason: decision.reason });
       return;
     }
+
+    // Normalize first: a bare mention has nothing to send and must not open a thread.
+    const inbound = await normalize(config, message as unknown as IngressMessage, decision.route, client.user.id, undefined, transcriber);
+    if (!inbound.text && inbound.images.length === 0 && inbound.files.length === 0) return;
 
     let route = decision.route;
     let channel = message.channel as TextBasedChannel;
@@ -190,8 +197,7 @@ export async function startDiscord(
       }
     }
 
-    const inbound = await normalize(config, message as unknown as IngressMessage, route, client.user.id, undefined, transcriber);
-    if (!inbound.text && inbound.images.length === 0 && inbound.files.length === 0) return;
+    inbound.route = route;
     const pending: Pending = { route, inbound, message, channel };
     // A thread creation means a fresh route; no point debouncing the first message.
     if (decision.needsThread) void dispatch(route, [pending]);
@@ -279,7 +285,9 @@ export async function startDiscord(
     ready: () => isReady,
     async stop() {
       stopping = true;
-      debouncer.flushAll();
+      // The bridge is shutting down too, so a flushed turn would only be cut off mid-setup.
+      const dropped = debouncer.clear();
+      if (dropped) log.warn("dropped debounced messages on shutdown", { count: dropped });
       approvals.cancelAll();
       await client.destroy();
     },

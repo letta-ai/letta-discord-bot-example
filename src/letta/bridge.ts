@@ -49,6 +49,8 @@ export interface BridgeDeps {
   routes?: RoutingTable | null;
   /** Override for tests. */
   now?: () => number;
+  /** How long a cancelled turn may wait for the runtime to confirm the abort before its session is closed. */
+  abortGraceMs?: number;
 }
 
 interface QueuedTurn {
@@ -707,11 +709,21 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
       s.aborted = true;
       // Still creating the conversation or sandbox: runTurn stops before sending.
       if (!s.session) return true;
+      const session = s.session;
+      const turn = s.current;
       try {
-        await s.session.abort();
+        await session.abort();
       } catch (err) {
         log.warn("abort failed", { route: s.key, err: String(err) });
       }
+      // The runtime normally confirms with a result. If it never does, closing
+      // the session ends the stream, so the turn settles and the lane is freed.
+      const grace = setTimeout(() => {
+        if (s.session !== session || s.current !== turn || !s.busy) return;
+        log.warn("abort not confirmed; closing session", { route: s.key });
+        closeSession(s, "abort unconfirmed");
+      }, deps.abortGraceMs ?? 10_000);
+      grace.unref?.();
       return true;
     },
 
