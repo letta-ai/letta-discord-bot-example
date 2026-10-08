@@ -95,3 +95,71 @@ describe("gateway dispatch", () => {
     await runtime.stop();
   });
 });
+
+describe("gateway edge cases", () => {
+  test("a bare mention does not open an empty thread", async () => {
+    const submitted: string[][] = [];
+    const client = fakeClient();
+    const store = new RouteStore(":memory:");
+    const runtime = await startDiscord(cfg({ DEBOUNCE_MS: "0" }), recordingBridge(submitted), store, client as never);
+    const threads: string[] = [];
+    const m = message("m1") as ReturnType<typeof message> & Record<string, unknown>;
+    m.content = `<@${BOT}>`;
+    (m.channel as Record<string, unknown>).type = 0; // GuildText
+    m.startThread = async () => {
+      threads.push("t1");
+      return { id: "t1", send: async () => ({}), sendTyping: async () => {} };
+    };
+    client.emit(Events.MessageCreate, m);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(threads).toEqual([]);
+    expect(store.isBotThread("t1")).toBe(false);
+    expect(submitted).toEqual([]);
+    await runtime.stop();
+  });
+
+  test("a message whose partial fetch failed is handled when Discord redelivers it", async () => {
+    const submitted: string[][] = [];
+    const client = fakeClient();
+    const runtime = await startDiscord(
+      cfg({ DEBOUNCE_MS: "0", AUTO_THREAD: "false" }),
+      recordingBridge(submitted),
+      new RouteStore(":memory:"),
+      client as never,
+    );
+    let fetches = 0;
+    const partial = () => {
+      const m = message("m1") as ReturnType<typeof message> & Record<string, unknown>;
+      m.partial = true;
+      m.fetch = async () => {
+        if (++fetches === 1) throw new Error("503 Service Unavailable");
+        m.partial = false;
+        return m;
+      };
+      return m;
+    };
+    client.emit(Events.MessageCreate, partial());
+    await new Promise((r) => setTimeout(r, 10));
+    client.emit(Events.MessageCreate, partial());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetches).toBe(2);
+    expect(submitted).toEqual([["m1"]]);
+    await runtime.stop();
+  });
+
+  test("stop drops debounced messages instead of starting turns during shutdown", async () => {
+    const submitted: string[][] = [];
+    const client = fakeClient();
+    const runtime = await startDiscord(
+      cfg({ DEBOUNCE_MS: "1000", AUTO_THREAD: "false" }),
+      recordingBridge(submitted),
+      new RouteStore(":memory:"),
+      client as never,
+    );
+    client.emit(Events.MessageCreate, message("m1"));
+    await new Promise((r) => setTimeout(r, 10));
+    await runtime.stop();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(submitted).toEqual([]);
+  });
+});

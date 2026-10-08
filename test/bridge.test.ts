@@ -34,7 +34,7 @@ function inbound(id: string, text: string, files: InboundMessage["files"] = [], 
 
 type Script = (sent: unknown, n: number, otid?: string) => SDKMessage[] | Error;
 
-function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean; readyGate?: Promise<void> } = {}) {
+function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?: boolean; readyGate?: Promise<void>; silentAbort?: boolean } = {}) {
   const calls = { creates: 0, resumes: 0, sends: [] as unknown[], closes: 0, aborts: 0, uploads: [] as string[], canUseTool: null as any, resumedIds: [] as string[], options: [] as any[] };
   let readyFails = opts.failReadyOnce ? 1 : 0;
   const client: LettaClientLike = {
@@ -102,6 +102,7 @@ function fakeClient(script: Script, opts: { failReadyOnce?: boolean; noSandbox?:
         },
         async abort() {
           calls.aborts++;
+          if (opts.silentAbort) return;
           // The runtime reports the cancelled turn as a failed result.
           push({ type: "result", success: false, errorCode: "cancelled", durationMs: 0 } as unknown as SDKMessage);
         },
@@ -336,6 +337,27 @@ describe("bridge", () => {
     await p;
     expect(calls.aborts).toBe(1);
     expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "interrupted" });
+  });
+
+  test("cancel frees the lane when the runtime never confirms the abort", async () => {
+    let n = 0;
+    const { client, calls } = fakeClient(
+      () => (++n === 1 ? [{ type: "assistant", content: "partial" } as SDKMessage] : ok("fresh")),
+      { silentAbort: true },
+    );
+    const bridge = createAgentBridge(config, { client, store: new RouteStore(":memory:"), abortGraceMs: 20 });
+    const c = ctxCollector();
+    const p = bridge.submit([inbound("m1", "long task")], c.ctx);
+    while (!c.events.some((e) => e.kind === "assistant_delta")) await new Promise((r) => setTimeout(r, 1));
+    expect(await bridge.cancel(route)).toBe(true);
+    const outcome = await Promise.race([p.then(() => "settled"), new Promise((r) => setTimeout(() => r("stranded"), 500))]);
+    expect(outcome).toBe("settled");
+    expect(c.events.at(-1)).toMatchObject({ kind: "done", success: false, errorCode: "interrupted" });
+    // The lane takes new work on a fresh session.
+    const d = ctxCollector("m2");
+    await bridge.submit([inbound("m2", "next")], d.ctx);
+    expect(d.events.at(-1)).toMatchObject({ kind: "done", success: true });
+    expect(calls.resumes).toBe(2);
   });
 
   test("cancel during session setup stops the turn before anything is sent", async () => {

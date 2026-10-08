@@ -285,6 +285,10 @@ export class Deduper {
     this.seen.set(id, now);
     return true;
   }
+  /** Allow `id` again, for a message that was claimed but could not be handled. */
+  forget(id: string) {
+    this.seen.delete(id);
+  }
 }
 
 /**
@@ -317,10 +321,14 @@ export class Debouncer<T> {
     this.pending.delete(key);
     this.flush(key, p.items);
   }
-  flushAll() {
-    for (const key of [...this.pending.keys()]) {
-      clearTimeout(this.pending.get(key)!.timer);
-      this.fire(key);
+  /** Drop everything still waiting, without flushing. Returns how many items were dropped. */
+  clear(): number {
+    let dropped = 0;
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      dropped += p.items.length;
     }
+    this.pending.clear();
+    return dropped;
   }
 }

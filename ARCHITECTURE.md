@@ -76,7 +76,7 @@ There is no `hidden` option. The resulting conversation id is stored in `RouteSt
 
 The bridge opens a session with the route's tool policy (permission mode, allowed tools, toolset base, and approval mode, each from the most specific routing-table entry that sets it, else the table `policy`, else env), plus the approval callback and listener tools. The `LettaAgentClient` gets either a named `computer` or an SDK-managed Cloud sandbox with a TTL clamped to 1 through 60 minutes. A session closes after `SESSION_IDLE_MINUTES`, on reset, error, reply-mode change, tool-policy change (a pinned lane serving surfaces with different policies), or shutdown. The Letta conversation remains.
 
-Each lane runs one turn at a time. Consecutive queued items from the same route merge into one batch, while a lane shared by pinned routes never merges across routes. A cancellation drops matching queued turns and aborts the active session when that route owns the current turn.
+Each lane runs one turn at a time. Consecutive queued items from the same route merge into one batch, while a lane shared by pinned routes never merges across routes. A cancellation drops matching queued turns and aborts the active session when that route owns the current turn. If the runtime never confirms the abort, the session is closed after a short grace period so the lane is freed.
 
 ## Envelope and files
 
@@ -121,4 +121,4 @@ The Gateway registers `AgentBridge.onBackground` once. For each background burst
 
 ## Process lifecycle
 
-`src/index.ts` creates one `LettaAgentClient`, one Discord client, and one SQLite store. `/healthz` returns 200 only when Discord is ready, otherwise 503. `SIGINT` and `SIGTERM` stop Discord intake, cancel approvals, abort and close sessions, close the SDK client and store, and stop the health server. Run exactly one process for a Discord bot token to prevent duplicate Gateway handling.
+`src/index.ts` creates one `LettaAgentClient`, one Discord client, and one SQLite store. `/healthz` returns 200 only when Discord is ready, otherwise 503. `SIGINT` and `SIGTERM` stop Discord intake, drop debounced messages not yet sent, cancel approvals, abort and close sessions, close the SDK client and store, and stop the health server. Run exactly one process for a Discord bot token to prevent duplicate Gateway handling.
