@@ -640,7 +640,7 @@ export function createAgentBridge(config: Config, deps: BridgeDeps = {}): AgentB
             route: s.key,
             hint: config.LETTA_COMPUTER
               ? "check LETTA_API_KEY and that it can reach LETTA_COMPUTER"
-              : "managed Cloud sandboxes currently reject some API keys on sandbox refresh (https://linear.app/letta/issue/LET-13714); check LETTA_API_KEY or set LETTA_COMPUTER",
+              : "check LETTA_API_KEY; if it is valid and the managed Cloud sandbox still rejects it, run tools on a connected computer with LETTA_COMPUTER",
           });
           emit({ kind: "error", message: "Letta rejected this bot's credentials (HTTP 401). The operator should check the bot's logs." });
           emit({ kind: "done", success: false, errorCode: "error", durationMs: 0 });
