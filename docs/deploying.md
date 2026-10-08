@@ -182,7 +182,6 @@ Where the bot runs is separate from where the agent's tools run. When `LETTA_COM
 the SDK creates a managed Cloud sandbox for each conversation. Set `LETTA_COMPUTER` to route tools
 to a connected computer, which doctor verifies is online.
 
-Known issue [LET-13714](https://linear.app/letta/issue/LET-13714): for some API keys, creating the
-sandbox succeeds but the SDK's follow-up `POST /v1/sandboxes/:id/refresh` returns `401`, so every
-turn fails with "Letta rejected this bot's credentials". The bot log names the issue. Until it is
-fixed, use `LETTA_COMPUTER` with those keys.
+If every turn fails with "Letta rejected this bot's credentials", check `LETTA_API_KEY` first. If
+the key is valid and only the managed sandbox rejects it, set `LETTA_COMPUTER` to run tools on a
+connected computer instead.
