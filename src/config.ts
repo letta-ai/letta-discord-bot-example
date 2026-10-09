@@ -66,6 +66,8 @@ export const ConfigSchema = z.object({
   DISCORD_ADMIN_ROLE_IDS: csv,
   DM_POLICY: z.enum(["off", "allowlist", "open"]).default("allowlist"),
   RESPOND_TO_BOTS: bool(false),
+  // false: skip the privileged Message Content intent. Only mentions, replies to the bot, and DMs carry text.
+  DISCORD_MESSAGE_CONTENT_INTENT: bool(true),
   AUTO_THREAD: bool(true),
   REGISTER_SLASH_COMMANDS: bool(true),
 

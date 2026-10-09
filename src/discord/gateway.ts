@@ -59,12 +59,13 @@ interface Pending {
   channel: TextBasedChannel;
 }
 
-export function createDiscordClient(): Client {
+export function createDiscordClient(config: Pick<Config, "DISCORD_MESSAGE_CONTENT_INTENT">): Client {
   return new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
+      // Privileged. Without it Discord still sends text for mentions, replies to the bot, and DMs.
+      ...(config.DISCORD_MESSAGE_CONTENT_INTENT ? [GatewayIntentBits.MessageContent] : []),
       GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.DirectMessages,
     ],
@@ -76,7 +77,7 @@ export async function startDiscord(
   config: Config,
   bridge: AgentBridge,
   store: RouteStore,
-  client: Client = createDiscordClient(),
+  client: Client = createDiscordClient(config),
 ): Promise<DiscordRuntime> {
   const approvals = new ApprovalManager({ config });
   const transcriber = transcriberFromConfig(config);
