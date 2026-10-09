@@ -25,10 +25,10 @@ ENV NODE_ENV=production \
     HEALTH_PORT=8080
 
 # The route to conversation index lives here, so the directory must exist and be
-# writable by the unprivileged user.
+# writable by the unprivileged user. Mount a volume here at run time; there is no
+# VOLUME instruction because Railway's builder rejects it.
 RUN mkdir -p /app/data && chown -R bun:bun /app
 
-VOLUME /app/data
 USER bun
 
 EXPOSE 8080
