@@ -109,16 +109,22 @@ async function discordGet<T>(fetchImpl: DoctorFetch, token: string, path: string
   return { response, body: await json<T>(response) };
 }
 
-export function checkMessageContentIntent(flags: number | undefined): CheckResult {
+export function checkMessageContentIntent(flags: number | undefined, requested = true): CheckResult {
   const enabled = typeof flags === "number" && (flags & (MESSAGE_CONTENT | MESSAGE_CONTENT_LIMITED)) !== 0;
-  return enabled
-    ? result("PASS", "Message Content intent", "enabled for the Discord application", "No action needed.")
-    : result(
-        "FAIL",
-        "Message Content intent",
-        "not enabled for the Discord application",
-        "Enable Message Content Intent on the Discord Developer Portal Bot page.",
-      );
+  if (enabled) return result("PASS", "Message Content intent", "enabled for the Discord application", "No action needed.");
+  if (!requested)
+    return result(
+      "WARN",
+      "Message Content intent",
+      "not enabled; DISCORD_MESSAGE_CONTENT_INTENT=false, so the bot answers only mentions, replies to it, and DMs",
+      "Enable Message Content Intent and unset DISCORD_MESSAGE_CONTENT_INTENT to use open channels and unmentioned thread follow-ups.",
+    );
+  return result(
+    "FAIL",
+    "Message Content intent",
+    "not enabled for the Discord application",
+    "Enable Message Content Intent on the Discord Developer Portal Bot page, or set DISCORD_MESSAGE_CONTENT_INTENT=false.",
+  );
 }
 
 export function buildInviteUrl(applicationId: string): string {
@@ -194,6 +200,7 @@ export async function checkDiscordToken(fetchImpl: DoctorFetch, token: string): 
 export async function checkDiscordApplication(
   fetchImpl: DoctorFetch,
   token: string,
+  intentRequested = true,
 ): Promise<{ checks: CheckResult[]; application?: DiscordApplication }> {
   try {
     const { response, body } = await discordGet<DiscordApplication>(fetchImpl, token, "/applications/@me");
@@ -212,7 +219,7 @@ export async function checkDiscordApplication(
     return {
       application: body,
       checks: [
-        checkMessageContentIntent(body.flags),
+        checkMessageContentIntent(body.flags, intentRequested),
         result("PASS", "Invite URL", buildInviteUrl(body.id), "Open this URL to install or update the bot permissions."),
       ],
     };
@@ -597,7 +604,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<CheckResul
   const results: CheckResult[] = [result("PASS", "Config", "configuration is valid", "No action needed."), checkApprovers(config)];
   const token = await checkDiscordToken(fetchImpl, config.DISCORD_BOT_TOKEN);
   results.push(token.check);
-  const application = await checkDiscordApplication(fetchImpl, config.DISCORD_BOT_TOKEN);
+  const application = await checkDiscordApplication(fetchImpl, config.DISCORD_BOT_TOKEN, config.DISCORD_MESSAGE_CONTENT_INTENT);
   results.push(...application.checks);
   results.push(...(await checkGuildMembership(fetchImpl, config.DISCORD_BOT_TOKEN, config.DISCORD_GUILD_IDS)));
 

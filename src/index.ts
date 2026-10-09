@@ -11,6 +11,11 @@ async function main() {
   const config = loadConfig();
   setLogLevel(config.LOG_LEVEL);
 
+  if (!config.DISCORD_MESSAGE_CONTENT_INTENT) {
+    log.warn("DISCORD_MESSAGE_CONTENT_INTENT=false: answering only mentions, replies to the bot, and DMs", {
+      hint: "open channels and unmentioned thread follow-ups need the Message Content intent",
+    });
+  }
   if (config.APPROVAL_MODE === "admins" && config.DISCORD_ADMIN_USER_IDS.length === 0 && config.DISCORD_ADMIN_ROLE_IDS.length === 0) {
     log.warn("APPROVAL_MODE=admins but no admins are configured; tool calls that need approval are denied", {
       hint: "set DISCORD_ADMIN_USER_IDS or DISCORD_ADMIN_ROLE_IDS",
@@ -29,7 +34,7 @@ async function main() {
   }
 
   const store = new RouteStore(config.DATA_DIR);
-  const client = createDiscordClient();
+  const client = createDiscordClient(config);
   const bridge = createAgentBridge(config, {
     store,
     routes,

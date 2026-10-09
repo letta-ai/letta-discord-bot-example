@@ -64,8 +64,9 @@ the Letta app, or anywhere else.
 ### 👾 Create your Discord app
 
 1. Create an application at <https://discord.com/developers/applications> and add a bot.
-2. On the **Bot** page, enable the **Message Content** privileged gateway intent. Without it the
-   bot receives empty messages.
+2. On the **Bot** page, enable the **Message Content** privileged gateway intent. If you cannot,
+   set `DISCORD_MESSAGE_CONTENT_INTENT=false`: the bot then answers only @mentions, replies to
+   it, and DMs.
 3. Copy the bot token from the same page (**Reset Token** if you never copied it).
 4. On **OAuth2 > URL Generator**, pick the `bot` and `applications.commands` scopes, then enable
    exactly these permissions:
@@ -258,6 +259,7 @@ needed; the rest have sensible defaults. `bun run doctor` validates all of them.
 | `DISCORD_ADMIN_ROLE_IDS` | empty (CSV) | Roles whose members count as admins. |
 | `DM_POLICY` | `allowlist` | `off`, `allowlist` or `open`. |
 | `RESPOND_TO_BOTS` | `false` | Answer other bots when they mention or reply to this bot. |
+| `DISCORD_MESSAGE_CONTENT_INTENT` | `true` | Set `false` if the app lacks the Message Content intent. The bot then answers only mentions, replies to it, and DMs. |
 | `AUTO_THREAD` | `true` | Start a thread when mentioned in a channel. |
 | `REGISTER_SLASH_COMMANDS` | `true` | Register the slash commands on startup. |
 | `STREAM_EDITS` | `false` | Stream replies by editing one message as text arrives. |

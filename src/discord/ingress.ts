@@ -126,11 +126,14 @@ export function gate(config: Config, msg: IngressMessage, deps: GateDeps): GateD
     };
   }
 
-  const open = config.DISCORD_OPEN_CHANNEL_IDS.includes(parentId) || config.DISCORD_OPEN_CHANNEL_IDS.includes(msg.channel.id);
+  // Without the Message Content intent, unaddressed guild messages arrive empty, so only answer when addressed.
+  const open =
+    config.DISCORD_MESSAGE_CONTENT_INTENT &&
+    (config.DISCORD_OPEN_CHANNEL_IDS.includes(parentId) || config.DISCORD_OPEN_CHANNEL_IDS.includes(msg.channel.id));
 
   if (isThread) {
     const route: RouteKey = { guildId: msg.guildId, channelId: parentId, threadId: msg.channel.id };
-    const known = deps.isBotThread(msg.channel.id) || deps.hasRoute(route);
+    const known = config.DISCORD_MESSAGE_CONTENT_INTENT && (deps.isBotThread(msg.channel.id) || deps.hasRoute(route));
     if (!mentioned && !open && !known) return { accept: false, reason: "thread-not-addressed" };
     return { accept: true, route, needsThread: false, mentioned };
   }
